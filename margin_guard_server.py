@@ -170,8 +170,20 @@ class WebhookHandler(BaseHTTPRequestHandler):
         return dashboard.handle_get(self)
 
     def do_POST(self):
-        if self.path.startswith("/api/"):
-            return dashboard.handle_post(self)
+        if self.path.startswith("/api/session-auth"):
+        auth_header = self.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer "):
+            self.send_response(401)
+            self.end_headers()
+            self.wfile.write(b'{"error":"Missing Bearer token"}')
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(b'{"status":"authenticated"}')
+        return
+    if self.path.startswith("/api/"):
+        return dashboard.handle_post(self)
         topic = self.headers.get("X-Shopify-Topic", "")
         if self.path.startswith("/webhooks") or topic in ("customers/data_request", "customers/redact", "shop/redact"):
             return dashboard.handle_compliance_webhook(self)

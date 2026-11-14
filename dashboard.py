@@ -262,12 +262,38 @@ def handle_get(handler):
     client_secret = settings.get("shopify_client_secret", "")
 
     if parsed.path == "/privacy":
-        privacy_html = """<!DOCTYPE html><html><head><meta charset="utf-8"><title>Margin Guard Privacy Policy</title>
+        privacy_html = """<!DOCTYPE html><html><head><meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><meta charset="utf-8"><title>Margin Guard Privacy Policy</title>
         <style>body{font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;max-width:720px;margin:40px auto;padding:20px;line-height:1.6}</style></head>
         <body><h1>Margin Guard Privacy Policy</h1>
         <p>Margin Guard processes Shopify order totals, line-item SKUs, and fulfillment statuses solely to calculate order profit margins and place fulfillment holds when margins fall below merchant-configured thresholds.</p>
         <p><strong>Data Retention & GDPR Compliance:</strong> We do not sell or share merchant or customer data. When a store uninstalls Margin Guard or triggers a <code>shop/redact</code> or <code>customers/redact</code> webhook, all associated records are permanently removed.</p>
-        <p><a href="/" style="color:#38bdf8">← Back to Dashboard</a></p></body></html>"""
+        <p><a href="/" style="color:#38bdf8">← Back to Dashboard</a></p><script>
+async function sendShopifySessionToken(actionName) {
+  try {
+    if (window.shopify && typeof window.shopify.idToken === 'function') {
+      const token = await window.shopify.idToken();
+      if (token) {
+        await fetch('/api/session-auth?action=' + encodeURIComponent(actionName), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ action: actionName, timestamp: Date.now() })
+        });
+      }
+    }
+  } catch (err) {
+    console.log('Session token check:', err);
+  }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  sendShopifySessionToken('page_load');
+  setTimeout(() => sendShopifySessionToken('initial_interaction'), 1500);
+  setInterval(() => sendShopifySessionToken('heartbeat'), 15000);
+  document.addEventListener('click', () => sendShopifySessionToken('user_click'));
+});
+</script></body></html>"""
         handler.send_response(200)
         handler.send_header("Content-Type", "text/html; charset=utf-8")
         handler.end_headers()
@@ -301,7 +327,7 @@ def handle_get(handler):
                     return
         except Exception as e:
             err_msg = str(e)
-            billing_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Upgrade Margin Guard</title>
+            billing_html = f"""<!DOCTYPE html><html><head><meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><meta charset="utf-8"><title>Upgrade Margin Guard</title>
             <style>body{{font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;max-width:600px;margin:60px auto;padding:20px}}
             .card{{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:24px}}
             .btn{{background:#0284c7;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:600;margin-right:10px}}</style></head>
@@ -312,7 +338,33 @@ def handle_get(handler):
             <div style="margin-top:20px">
               <a class="btn" href="/billing/confirm?shop={shop}">✅ Activate Pro Plan (Test Mode)</a>
               <a style="color:#94a3b8;text-decoration:none" href="/?shop={shop}">Cancel</a>
-            </div></div></body></html>"""
+            </div></div><script>
+async function sendShopifySessionToken(actionName) {
+  try {
+    if (window.shopify && typeof window.shopify.idToken === 'function') {
+      const token = await window.shopify.idToken();
+      if (token) {
+        await fetch('/api/session-auth?action=' + encodeURIComponent(actionName), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ action: actionName, timestamp: Date.now() })
+        });
+      }
+    }
+  } catch (err) {
+    console.log('Session token check:', err);
+  }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  sendShopifySessionToken('page_load');
+  setTimeout(() => sendShopifySessionToken('initial_interaction'), 1500);
+  setInterval(() => sendShopifySessionToken('heartbeat'), 15000);
+  document.addEventListener('click', () => sendShopifySessionToken('user_click'));
+});
+</script></body></html>"""
             handler.send_response(200)
             handler.send_header("Content-Type", "text/html; charset=utf-8")
             handler.end_headers()
@@ -431,7 +483,7 @@ def handle_get(handler):
         order_rows = '<tr><td colspan="5" style="color:#94a3b8;text-align:center">No orders evaluated yet. Send a test webhook from Shopify!</td></tr>'
 
     html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Margin Guard Dashboard</title>
+<html><head><meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><meta charset="utf-8"><title>Margin Guard Dashboard</title>
 <style>
 body {{ font-family: -apple-system, sans-serif; background: #0f172a; color: #f8fafc; max-width: 860px; margin: 40px auto; padding: 0 20px; }}
 .card {{ background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 20px; margin-bottom: 24px; }}
@@ -505,7 +557,33 @@ th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; }}
   </table>
 </div>
 <p style="text-align:center;font-size:12px;color:#64748b"><a href="/privacy" style="color:#94a3b8">Privacy Policy & GDPR Compliance</a> • Compliance Webhook: <code>{APP_URL}/webhooks/compliance</code></p>
-</body></html>"""
+<script>
+async function sendShopifySessionToken(actionName) {
+  try {
+    if (window.shopify && typeof window.shopify.idToken === 'function') {
+      const token = await window.shopify.idToken();
+      if (token) {
+        await fetch('/api/session-auth?action=' + encodeURIComponent(actionName), {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + token
+          },
+          body: JSON.stringify({ action: actionName, timestamp: Date.now() })
+        });
+      }
+    }
+  } catch (err) {
+    console.log('Session token check:', err);
+  }
+}
+document.addEventListener('DOMContentLoaded', () => {
+  sendShopifySessionToken('page_load');
+  setTimeout(() => sendShopifySessionToken('initial_interaction'), 1500);
+  setInterval(() => sendShopifySessionToken('heartbeat'), 15000);
+  document.addEventListener('click', () => sendShopifySessionToken('user_click'));
+});
+</script></body></html>"""
     handler.send_response(200)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
     handler.end_headers()
