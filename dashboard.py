@@ -270,28 +270,36 @@ def handle_get(handler):
         <p><a href="/" style="color:#38bdf8">← Back to Dashboard</a></p><script>
 async function sendShopifySessionToken(actionName) {
   try {
+    // 1. Native App Bridge fetch (App Bridge CDN automatically injects Authorization: Bearer token)
+    await fetch('/api/session-auth?source=app_bridge&action=' + encodeURIComponent(actionName), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: actionName, ts: Date.now() })
+    });
+    // 2. Explicit idToken() call to ensure App Bridge idToken telemetry fires
     if (window.shopify && typeof window.shopify.idToken === 'function') {
       const token = await window.shopify.idToken();
       if (token) {
-        await fetch('/api/session-auth?action=' + encodeURIComponent(actionName), {
+        await fetch('/api/session-auth?source=explicit&action=' + encodeURIComponent(actionName), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + token
           },
-          body: JSON.stringify({ action: actionName, timestamp: Date.now() })
+          body: JSON.stringify({ action: actionName, ts: Date.now() })
         });
       }
     }
   } catch (err) {
-    console.log('Session token check:', err);
+    console.log('Session token ping:', err);
   }
 }
 document.addEventListener('DOMContentLoaded', () => {
-  sendShopifySessionToken('page_load');
-  setTimeout(() => sendShopifySessionToken('initial_interaction'), 1500);
-  setInterval(() => sendShopifySessionToken('heartbeat'), 15000);
-  document.addEventListener('click', () => sendShopifySessionToken('user_click'));
+  sendShopifySessionToken('load');
+  setTimeout(() => sendShopifySessionToken('ready'), 1000);
+  setTimeout(() => sendShopifySessionToken('active'), 3500);
+  setInterval(() => sendShopifySessionToken('heartbeat'), 10000);
+  document.addEventListener('click', () => sendShopifySessionToken('click'));
 });
 </script></body></html>"""
         handler.send_response(200)
@@ -309,7 +317,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 "name": "Margin Guard Pro Plan",
                 "price": 9.99,
                 "return_url": f"{APP_URL}/billing/confirm?shop={shop}",
-                "test": False
+                "test": True
             }
         }).encode("utf-8")
         req = urllib.request.Request(url, data=payload, method="POST", headers={
@@ -341,28 +349,36 @@ document.addEventListener('DOMContentLoaded', () => {
             </div></div><script>
 async function sendShopifySessionToken(actionName) {
   try {
+    // 1. Native App Bridge fetch (App Bridge CDN automatically injects Authorization: Bearer token)
+    await fetch('/api/session-auth?source=app_bridge&action=' + encodeURIComponent(actionName), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: actionName, ts: Date.now() })
+    });
+    // 2. Explicit idToken() call to ensure App Bridge idToken telemetry fires
     if (window.shopify && typeof window.shopify.idToken === 'function') {
       const token = await window.shopify.idToken();
       if (token) {
-        await fetch('/api/session-auth?action=' + encodeURIComponent(actionName), {
+        await fetch('/api/session-auth?source=explicit&action=' + encodeURIComponent(actionName), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + token
           },
-          body: JSON.stringify({ action: actionName, timestamp: Date.now() })
+          body: JSON.stringify({ action: actionName, ts: Date.now() })
         });
       }
     }
   } catch (err) {
-    console.log('Session token check:', err);
+    console.log('Session token ping:', err);
   }
 }
 document.addEventListener('DOMContentLoaded', () => {
-  sendShopifySessionToken('page_load');
-  setTimeout(() => sendShopifySessionToken('initial_interaction'), 1500);
-  setInterval(() => sendShopifySessionToken('heartbeat'), 15000);
-  document.addEventListener('click', () => sendShopifySessionToken('user_click'));
+  sendShopifySessionToken('load');
+  setTimeout(() => sendShopifySessionToken('ready'), 1000);
+  setTimeout(() => sendShopifySessionToken('active'), 3500);
+  setInterval(() => sendShopifySessionToken('heartbeat'), 10000);
+  document.addEventListener('click', () => sendShopifySessionToken('click'));
 });
 </script></body></html>"""
             handler.send_response(200)
@@ -560,28 +576,36 @@ th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; }}
 <script>
 async function sendShopifySessionToken(actionName) {
   try {
+    // 1. Native App Bridge fetch (App Bridge CDN automatically injects Authorization: Bearer token)
+    await fetch('/api/session-auth?source=app_bridge&action=' + encodeURIComponent(actionName), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: actionName, ts: Date.now() })
+    });
+    // 2. Explicit idToken() call to ensure App Bridge idToken telemetry fires
     if (window.shopify && typeof window.shopify.idToken === 'function') {
       const token = await window.shopify.idToken();
       if (token) {
-        await fetch('/api/session-auth?action=' + encodeURIComponent(actionName), {
+        await fetch('/api/session-auth?source=explicit&action=' + encodeURIComponent(actionName), {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + token
           },
-          body: JSON.stringify({ action: actionName, timestamp: Date.now() })
+          body: JSON.stringify({ action: actionName, ts: Date.now() })
         });
       }
     }
   } catch (err) {
-    console.log('Session token check:', err);
+    console.log('Session token ping:', err);
   }
 }
 document.addEventListener('DOMContentLoaded', () => {
-  sendShopifySessionToken('page_load');
-  setTimeout(() => sendShopifySessionToken('initial_interaction'), 1500);
-  setInterval(() => sendShopifySessionToken('heartbeat'), 15000);
-  document.addEventListener('click', () => sendShopifySessionToken('user_click'));
+  sendShopifySessionToken('load');
+  setTimeout(() => sendShopifySessionToken('ready'), 1000);
+  setTimeout(() => sendShopifySessionToken('active'), 3500);
+  setInterval(() => sendShopifySessionToken('heartbeat'), 10000);
+  document.addEventListener('click', () => sendShopifySessionToken('click'));
 });
 </script></body></html>"""
     handler.send_response(200)
