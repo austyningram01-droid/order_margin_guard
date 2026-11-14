@@ -172,11 +172,18 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path.startswith("/api/"):
             return dashboard.handle_post(self)
-        if self.path.startswith("/webhooks/compliance"):
+        topic = self.headers.get("X-Shopify-Topic", "")
+        if self.path.startswith("/webhooks") or topic in ("customers/data_request", "customers/redact", "shop/redact"):
             return dashboard.handle_compliance_webhook(self)
         dashboard.sync_state(self.headers.get("X-Shopify-Shop-Domain"))
         content_length = int(self.headers.get('Content-Length', 0))
         body = self.rfile.read(content_length)
+        hmac_header = self.headers.get("X-Shopify-Hmac-Sha256", "")
+        if not dashboard.verify_shopify_hmac(body, hmac_header):
+            self.send_response(401)
+            self.end_headers()
+            self.wfile.write(b"Unauthorized HMAC")
+            return
         
         try:
             order_data = json.loads(body.decode('utf-8'))
