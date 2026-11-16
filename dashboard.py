@@ -337,6 +337,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </script></body></html>"""
         handler.send_response(200)
         handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
     shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
     handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
         handler.end_headers()
@@ -364,9 +365,13 @@ document.addEventListener('DOMContentLoaded', () => {
                 data = json.loads(resp.read().decode("utf-8"))
                 confirm_url = data.get("recurring_application_charge", {}).get("confirmation_url")
                 if confirm_url:
-                    top_redirect = f'<!DOCTYPE html><html><head><script>window.top.location.href = {json.dumps(confirm_url)};</script></head><body>Redirecting to Shopify billing approval...</body></html>'
+                    top_redirect = f'<!DOCTYPE html><html><head><script>window.top.location.href = {json.dumps(confirm_url)};</script>
+<meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" />
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+</head><body>Redirecting to Shopify billing approval...</body></html>'
                     handler.send_response(200)
                     handler.send_header("Content-Type", "text/html; charset=utf-8")
+                    handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
                     handler.end_headers()
                     handler.wfile.write(top_redirect.encode("utf-8"))
                     return
@@ -375,7 +380,10 @@ document.addEventListener('DOMContentLoaded', () => {
             billing_html = f"""<!DOCTYPE html><html><head><meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><meta charset="utf-8"><title>Upgrade Margin Guard</title>
             <style>body{{font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;max-width:600px;margin:60px auto;padding:20px}}
             .card{{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:24px}}
-            .btn{{background:#0284c7;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:600;margin-right:10px}}</style></head>
+            .btn{{background:#0284c7;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:600;margin-right:10px}}</style>
+<meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" />
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+</head>
             <body><div class="card"><h2 style="margin-top:0;color:#38bdf8">🛡️ Margin Guard Pro ($9.99/mo)</h2>
             <p><strong>Store:</strong> {shop} &nbsp;|&nbsp; <strong>Current Plan:</strong> {current_plan}</p>
             <p style="color:#cbd5e1;font-size:14px;line-height:1.5">Note: Your store is currently connected using a single-store Custom App token (<code>shpat_...</code>). Shopify's hosted Billing Checkout screen only opens for apps created in the <strong>Shopify Partner Dashboard</strong>.</p>
@@ -420,6 +428,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </script></body></html>"""
             handler.send_response(200)
             handler.send_header("Content-Type", "text/html; charset=utf-8")
+            handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
     shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
     handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
             handler.end_headers()
@@ -507,6 +516,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 landing_html = f.read()
             handler.send_response(200)
             handler.send_header("Content-Type", "text/html; charset=utf-8")
+            handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
     shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
     handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
             handler.end_headers()
@@ -558,7 +568,10 @@ th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; }}
 .top-bar {{ display: flex; gap: 12px; align-items: flex-end; }}
 .badge-ok {{ background: #065f46; color: #34d399; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }}
 .badge-hold {{ background: #7f1d1d; color: #f87171; padding: 4px 8px; border-radius: 4px; font-size: 12px; font-weight: 600; }}
-</style></head><body>
+</style>
+<meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" />
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+</head><body>
 <h1>
   <span>🛡️ Margin Guard App Dashboard</span>
   <span style="font-size:13px"><span class="badge-ok">{plan_status}</span> <a class="btn-link" style="margin-left:8px" href="/billing/subscribe?shop={shop}">Upgrade ($9.99/mo)</a></span>
@@ -651,6 +664,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </script></body></html>"""
     handler.send_response(200)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
+    handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
     shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
     handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
     handler.end_headers()
