@@ -166,6 +166,9 @@ def log_to_ledger(row: dict):
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
+    def do_HEAD(self):
+        return dashboard.handle_get(self)
+
     def do_GET(self):
         return dashboard.handle_get(self)
 
