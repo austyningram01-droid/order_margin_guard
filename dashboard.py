@@ -364,9 +364,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 data = json.loads(resp.read().decode("utf-8"))
                 confirm_url = data.get("recurring_application_charge", {}).get("confirmation_url")
                 if confirm_url:
-                    handler.send_response(302)
-                    handler.send_header("Location", confirm_url)
+                    top_redirect = f'<!DOCTYPE html><html><head><script>window.top.location.href = {json.dumps(confirm_url)};</script></head><body>Redirecting to Shopify billing approval...</body></html>'
+                    handler.send_response(200)
+                    handler.send_header("Content-Type", "text/html; charset=utf-8")
                     handler.end_headers()
+                    handler.wfile.write(top_redirect.encode("utf-8"))
                     return
         except Exception as e:
             err_msg = str(e)
