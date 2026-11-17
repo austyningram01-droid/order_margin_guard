@@ -337,9 +337,8 @@ document.addEventListener('DOMContentLoaded', () => {
 </script></body></html>"""
         handler.send_response(200)
         handler.send_header("Content-Type", "text/html; charset=utf-8")
-        handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
-    shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
-    handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
+        shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
+        handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
         handler.end_headers()
         handler.wfile.write(privacy_html.encode("utf-8"))
         return
@@ -428,9 +427,8 @@ document.addEventListener('DOMContentLoaded', () => {
 </script></body></html>"""
             handler.send_response(200)
             handler.send_header("Content-Type", "text/html; charset=utf-8")
-            handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
-    shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
-    handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
+        shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
+        handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
             handler.end_headers()
             handler.wfile.write(billing_html.encode("utf-8"))
             return
@@ -516,9 +514,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 landing_html = f.read()
             handler.send_response(200)
             handler.send_header("Content-Type", "text/html; charset=utf-8")
-            handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
-    shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
-    handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
+        shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
+        handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
             handler.end_headers()
             handler.wfile.write(landing_html.encode("utf-8"))
             return
@@ -664,9 +661,8 @@ document.addEventListener('DOMContentLoaded', () => {
 </script></body></html>"""
     handler.send_response(200)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
-    handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
-    shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
-    handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
+        shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
+        handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
     handler.end_headers()
     handler.wfile.write(html.encode("utf-8"))
 
