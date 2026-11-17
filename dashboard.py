@@ -294,40 +294,7 @@ async function sendShopifySessionToken(actionName) {
     console.log('Session token ping:', err);
   }
 }
-// Intercept all forms so every button click uses App Bridge session token fetch()
-document.addEventListener('submit', async (e) => {
-  const form = e.target;
-  if (form && form.action) {
-    e.preventDefault();
-    try {
-      const token = (window.shopify && typeof window.shopify.idToken === 'function')
-        ? await window.shopify.idToken()
-        : '';
-      const formData = new URLSearchParams(new FormData(form)).toString();
-      await fetch(form.getAttribute('action') || window.location.pathname, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-          ...(token ? { 'Authorization': 'Bearer ' + token } : {})
-        },
-        body: formData
-      });
-      await sendShopifySessionToken('form_submit');
-      window.location.reload();
-    } catch (err) {
-      form.submit();
-    }
-  }
-});
 document.addEventListener('DOMContentLoaded', () => {
-  try {
-    // Trigger Direct API query via App Bridge so Shopify CDN registers active session usage
-    fetch('shopify:admin/api/graphql.json', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ query: '{ shop { name myshopifyDomain } }' })
-    }).catch(() => {});
-  } catch (e) {}
   sendShopifySessionToken('load');
   setTimeout(() => sendShopifySessionToken('ready'), 1000);
   setTimeout(() => sendShopifySessionToken('active'), 3500);
@@ -337,8 +304,7 @@ document.addEventListener('DOMContentLoaded', () => {
 </script></body></html>"""
         handler.send_response(200)
         handler.send_header("Content-Type", "text/html; charset=utf-8")
-        shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
-        handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
+        handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
         handler.end_headers()
         handler.wfile.write(privacy_html.encode("utf-8"))
         return
@@ -364,25 +330,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 data = json.loads(resp.read().decode("utf-8"))
                 confirm_url = data.get("recurring_application_charge", {}).get("confirmation_url")
                 if confirm_url:
-                    top_redirect = f'<!DOCTYPE html><html><head><script>window.top.location.href = {json.dumps(confirm_url)};</script>
-<meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" />
-<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
-</head><body>Redirecting to Shopify billing approval...</body></html>'
-                    handler.send_response(200)
-                    handler.send_header("Content-Type", "text/html; charset=utf-8")
-                    handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
+                    handler.send_response(302)
+                    handler.send_header("Location", confirm_url)
                     handler.end_headers()
-                    handler.wfile.write(top_redirect.encode("utf-8"))
                     return
         except Exception as e:
             err_msg = str(e)
             billing_html = f"""<!DOCTYPE html><html><head><meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><meta charset="utf-8"><title>Upgrade Margin Guard</title>
             <style>body{{font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;max-width:600px;margin:60px auto;padding:20px}}
             .card{{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:24px}}
-            .btn{{background:#0284c7;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:600;margin-right:10px}}</style>
-<meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" />
-<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
-</head>
+            .btn{{background:#0284c7;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:600;margin-right:10px}}</style></head>
             <body><div class="card"><h2 style="margin-top:0;color:#38bdf8">🛡️ Margin Guard Pro ($9.99/mo)</h2>
             <p><strong>Store:</strong> {shop} &nbsp;|&nbsp; <strong>Current Plan:</strong> {current_plan}</p>
             <p style="color:#cbd5e1;font-size:14px;line-height:1.5">Note: Your store is currently connected using a single-store Custom App token (<code>shpat_...</code>). Shopify's hosted Billing Checkout screen only opens for apps created in the <strong>Shopify Partner Dashboard</strong>.</p>
@@ -391,44 +348,43 @@ document.addEventListener('DOMContentLoaded', () => {
               <a class="btn" href="/billing/confirm?shop={shop}">✅ Activate Pro Plan (Test Mode)</a>
               <a style="color:#94a3b8;text-decoration:none" href="/?shop={shop}">Cancel</a>
             </div></div><script>
-async function sendShopifySessionToken(actionName) {
-  try {
+async function sendShopifySessionToken(actionName) {{
+  try {{
     // 1. Native App Bridge fetch (App Bridge CDN automatically injects Authorization: Bearer token)
-    await fetch('/api/session-auth?source=app_bridge&action=' + encodeURIComponent(actionName), {
+    await fetch('/api/session-auth?source=app_bridge&action=' + encodeURIComponent(actionName), {{
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: actionName, ts: Date.now() })
-    });
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ action: actionName, ts: Date.now() }})
+    }});
     // 2. Explicit idToken() call to ensure App Bridge idToken telemetry fires
-    if (window.shopify && typeof window.shopify.idToken === 'function') {
+    if (window.shopify && typeof window.shopify.idToken === 'function') {{
       const token = await window.shopify.idToken();
-      if (token) {
-        await fetch('/api/session-auth?source=explicit&action=' + encodeURIComponent(actionName), {
+      if (token) {{
+        await fetch('/api/session-auth?source=explicit&action=' + encodeURIComponent(actionName), {{
           method: 'POST',
-          headers: {
+          headers: {{
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + token
-          },
-          body: JSON.stringify({ action: actionName, ts: Date.now() })
-        });
-      }
-    }
-  } catch (err) {
+          }},
+          body: JSON.stringify({{ action: actionName, ts: Date.now() }})
+        }});
+      }}
+    }}
+  }} catch (err) {{
     console.log('Session token ping:', err);
-  }
-}
-document.addEventListener('DOMContentLoaded', () => {
+  }}
+}}
+document.addEventListener('DOMContentLoaded', () => {{
   sendShopifySessionToken('load');
   setTimeout(() => sendShopifySessionToken('ready'), 1000);
   setTimeout(() => sendShopifySessionToken('active'), 3500);
   setInterval(() => sendShopifySessionToken('heartbeat'), 10000);
   document.addEventListener('click', () => sendShopifySessionToken('click'));
-});
+}});
 </script></body></html>"""
             handler.send_response(200)
             handler.send_header("Content-Type", "text/html; charset=utf-8")
-        shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
-        handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
+            handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
             handler.end_headers()
             handler.wfile.write(billing_html.encode("utf-8"))
             return
@@ -514,8 +470,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 landing_html = f.read()
             handler.send_response(200)
             handler.send_header("Content-Type", "text/html; charset=utf-8")
-        shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
-        handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
+            handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
             handler.end_headers()
             handler.wfile.write(landing_html.encode("utf-8"))
             return
@@ -533,7 +488,7 @@ document.addEventListener('DOMContentLoaded', () => {
     shop_options = "".join(f'<option value="{s}" {"selected" if s == shop else ""}>{s}</option>' for s in all_shops)
     rows_html = "".join(
         f"<tr><td><code>{s}</code></td><td>${d['unit_cost']:.2f}</td><td>${d['est_shipping']:.2f}</td>"
-        f"<td>{'' if s == 'DEFAULT' else f'<form method=\"POST\" action=\"/api/sku/delete\" style=\"margin:0\"><input type=\"hidden\" name=\"shop\" value=\"{shop}\"><input type=\"hidden\" name=\"sku\" value=\"{s}\"><button class=\"btn-del\">Delete</button></form>'}</td></tr>"
+        f'<td>{"" if s == "DEFAULT" else f"<form method=POST action=/api/sku/delete style=margin:0><input type=hidden name=shop value={shop}><input type=hidden name=sku value={s}><button class=btn-del>Delete</button></form>"}</td></tr>'
         for s, d in sorted(skus.items())
     )
     if orders:
@@ -625,44 +580,43 @@ th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; }}
 </div>
 <p style="text-align:center;font-size:12px;color:#64748b"><a href="/privacy" style="color:#94a3b8">Privacy Policy & GDPR Compliance</a> • Compliance Webhook: <code>{APP_URL}/webhooks/compliance</code></p>
 <script>
-async function sendShopifySessionToken(actionName) {
-  try {
+async function sendShopifySessionToken(actionName) {{
+  try {{
     // 1. Native App Bridge fetch (App Bridge CDN automatically injects Authorization: Bearer token)
-    await fetch('/api/session-auth?source=app_bridge&action=' + encodeURIComponent(actionName), {
+    await fetch('/api/session-auth?source=app_bridge&action=' + encodeURIComponent(actionName), {{
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ action: actionName, ts: Date.now() })
-    });
+      headers: {{ 'Content-Type': 'application/json' }},
+      body: JSON.stringify({{ action: actionName, ts: Date.now() }})
+    }});
     // 2. Explicit idToken() call to ensure App Bridge idToken telemetry fires
-    if (window.shopify && typeof window.shopify.idToken === 'function') {
+    if (window.shopify && typeof window.shopify.idToken === 'function') {{
       const token = await window.shopify.idToken();
-      if (token) {
-        await fetch('/api/session-auth?source=explicit&action=' + encodeURIComponent(actionName), {
+      if (token) {{
+        await fetch('/api/session-auth?source=explicit&action=' + encodeURIComponent(actionName), {{
           method: 'POST',
-          headers: {
+          headers: {{
             'Content-Type': 'application/json',
             'Authorization': 'Bearer ' + token
-          },
-          body: JSON.stringify({ action: actionName, ts: Date.now() })
-        });
-      }
-    }
-  } catch (err) {
+          }},
+          body: JSON.stringify({{ action: actionName, ts: Date.now() }})
+        }});
+      }}
+    }}
+  }} catch (err) {{
     console.log('Session token ping:', err);
-  }
-}
-document.addEventListener('DOMContentLoaded', () => {
+  }}
+}}
+document.addEventListener('DOMContentLoaded', () => {{
   sendShopifySessionToken('load');
   setTimeout(() => sendShopifySessionToken('ready'), 1000);
   setTimeout(() => sendShopifySessionToken('active'), 3500);
   setInterval(() => sendShopifySessionToken('heartbeat'), 10000);
   document.addEventListener('click', () => sendShopifySessionToken('click'));
-});
+}});
 </script></body></html>"""
     handler.send_response(200)
     handler.send_header("Content-Type", "text/html; charset=utf-8")
-        shop_param = qs.get("shop", "margin-guard-test-zbxaxsf2.myshopify.com")
-        handler.send_header("Content-Security-Policy", f"frame-ancestors https://{shop_param} https://*.myshopify.com https://admin.shopify.com;")
+    handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
     handler.end_headers()
     handler.wfile.write(html.encode("utf-8"))
 

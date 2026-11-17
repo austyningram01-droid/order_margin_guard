@@ -167,7 +167,7 @@ def log_to_ledger(row: dict):
 
 class WebhookHandler(BaseHTTPRequestHandler):
     def do_HEAD(self):
-        return dashboard.handle_get(self)
+        return self.do_GET()
 
     def do_GET(self):
         return dashboard.handle_get(self)
@@ -185,8 +185,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b'{"status":"authenticated"}')
             return
-    if self.path.startswith("/api/"):
-        return dashboard.handle_post(self)
+        if self.path.startswith("/api/"):
+            return dashboard.handle_post(self)
         topic = self.headers.get("X-Shopify-Topic", "")
         if self.path.startswith("/webhooks") or topic in ("customers/data_request", "customers/redact", "shop/redact"):
             return dashboard.handle_compliance_webhook(self)
