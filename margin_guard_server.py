@@ -188,7 +188,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/"):
             return dashboard.handle_post(self)
         topic = self.headers.get("X-Shopify-Topic", "")
-        if self.path.startswith("/webhooks") or topic in ("customers/data_request", "customers/redact", "shop/redact"):
+        if self.path.startswith("/webhooks/compliance") or topic in ("customers/data_request", "customers/redact", "shop/redact"):
             return dashboard.handle_compliance_webhook(self)
         dashboard.sync_state(self.headers.get("X-Shopify-Shop-Domain"))
         content_length = int(self.headers.get('Content-Length', 0))

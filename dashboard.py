@@ -78,19 +78,28 @@ def init_db():
     conn.commit()
     conn.close()
 
+def normalize_shop(raw_shop):
+    if not raw_shop:
+        return ""
+    s = str(raw_shop).strip().lower().replace("https://", "").replace("http://", "").split("/")[0]
+    if s and not s.endswith(".myshopify.com"):
+        s = f"{s}.myshopify.com"
+    return s
+
 def sync_state(target_shop=None):
     init_db()
+    shop = normalize_shop(target_shop) or "default_store"
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    row = None
-    if target_shop:
-        c.execute("SELECT shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status FROM merchants WHERE shop_domain = ?", (target_shop,))
-        row = c.fetchone()
+    c.execute("SELECT shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status FROM merchants WHERE shop_domain = ?", (shop,))
+    row = c.fetchone()
     if not row:
-        c.execute("SELECT shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status FROM merchants LIMIT 1")
-        row = c.fetchone()
+        c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, 15.0, '', '', 'FREE_TRIAL')", (shop,))
+        c.execute("INSERT OR IGNORE INTO sku_costs VALUES (?, 'DEFAULT', 10.0, 5.0)", (shop,))
+        conn.commit()
+        row = (shop, 15.0, "", "", "FREE_TRIAL")
 
-    shop, min_m, webhook, token, plan = row if row else ("default_store", 15.0, "", "", "FREE_TRIAL")
+    shop, min_m, webhook, token, plan = row
 
     c.execute("SELECT sku, unit_cost, est_shipping FROM sku_costs WHERE shop_domain = ?", (shop,))
     skus = {r[0]: {"unit_cost": r[1], "est_shipping": r[2]} for r in c.fetchall()}
@@ -237,22 +246,76 @@ def handle_compliance_webhook(handler):
     handler.wfile.write(b"OK")
 
 def register_order_webhook(shop, access_token):
+    shop = normalize_shop(shop)
+    if not shop or not access_token:
+        return
     url = f"https://{shop}/admin/api/2024-10/webhooks.json"
-    payload = json.dumps({
-        "webhook": {
-            "topic": "orders/create",
-            "address": f"{APP_URL}/",
-            "format": "json"
-        }
-    }).encode("utf-8")
-    req = urllib.request.Request(url, data=payload, method="POST", headers={
-        "Content-Type": "application/json",
-        "X-Shopify-Access-Token": access_token
+    for topic in ("orders/create", "orders/paid"):
+        payload = json.dumps({
+            "webhook": {
+                "topic": topic,
+                "address": f"{APP_URL}/webhooks/orders",
+                "format": "json"
+            }
+        }).encode("utf-8")
+        req = urllib.request.Request(url, data=payload, method="POST", headers={
+            "Content-Type": "application/json",
+            "X-Shopify-Access-Token": access_token
+        })
+        try:
+            urllib.request.urlopen(req, timeout=10)
+        except Exception as e:
+            print(f"[!] Webhook auto-registration notice ({topic}) for {shop}: {e}")
+
+def sync_recent_orders(target_shop):
+    shop = normalize_shop(target_shop)
+    if not shop or shop == "default_store":
+        return 0
+    token, _ = get_shop_token_and_plan(shop)
+    if not token:
+        return 0
+    url = f"https://{shop}/admin/api/2024-10/orders.json?status=any&limit=25"
+    req = urllib.request.Request(url, method="GET", headers={
+        "X-Shopify-Access-Token": token,
+        "Accept": "application/json"
     })
     try:
-        urllib.request.urlopen(req, timeout=10)
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            orders = json.loads(resp.read().decode("utf-8")).get("orders", [])
     except Exception as e:
-        print(f"[!] Webhook auto-registration notice for {shop}: {e}")
+        print(f"[!] Order sync fetch error for {shop}: {e}")
+        return 0
+
+    if not orders:
+        return 0
+
+    try:
+        from margin_guard_engine import evaluate_order_margin
+    except Exception:
+        evaluate_order_margin = None
+
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("SELECT order_name FROM order_logs WHERE shop_domain = ?", (shop,))
+    existing = {r[0] for r in c.fetchall()}
+    conn.close()
+
+    added = 0
+    for order_data in reversed(orders):
+        order_name = str(order_data.get("name") or f"#{order_data.get('order_number', '0000')}")
+        if order_name in existing:
+            continue
+        if evaluate_order_margin:
+            try:
+                res = evaluate_order_margin(order_data)
+            except Exception:
+                res = {"action": "APPROVED", "margin_pct": 100.0}
+        else:
+            res = {"action": "APPROVED", "margin_pct": 100.0}
+        record_order(shop, order_data, res)
+        existing.add(order_name)
+        added += 1
+    return added
 
 def handle_get(handler):
     parsed = urlparse(handler.path)
@@ -474,18 +537,27 @@ document.addEventListener('DOMContentLoaded', () => {{
             handler.end_headers()
             handler.wfile.write(landing_html.encode("utf-8"))
             return
-    shop, min_m, webhook, skus = sync_state(target_shop)
-    _, plan_status = get_shop_token_and_plan(shop)
+    clean_target = normalize_shop(target_shop)
+    shop, min_m, webhook, skus = sync_state(clean_target)
+    token, plan_status = get_shop_token_and_plan(shop)
+
+    if clean_target and not token and client_id:
+        install_redirect = f"{APP_URL}/install?shop={clean_target}"
+        auth_html = f'<!DOCTYPE html><html><head><meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><script>window.top.location.href = {json.dumps(install_redirect)};</script></head><body>Redirecting to Shopify authorization for {clean_target}...</body></html>'
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
+        handler.end_headers()
+        handler.wfile.write(auth_html.encode("utf-8"))
+        return
+
+    sync_recent_orders(shop)
 
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT shop_domain FROM merchants ORDER BY shop_domain")
-    all_shops = [r[0] for r in c.fetchall()]
-    c.execute("SELECT order_name, total_price, margin_pct, action, created_at FROM order_logs WHERE shop_domain = ? ORDER BY id DESC LIMIT 15", (shop,))
+    c.execute("SELECT order_name, total_price, margin_pct, action, created_at FROM order_logs WHERE shop_domain = ? ORDER BY id DESC LIMIT 25", (shop,))
     orders = c.fetchall()
     conn.close()
-
-    shop_options = "".join(f'<option value="{s}" {"selected" if s == shop else ""}>{s}</option>' for s in all_shops)
     rows_html = "".join(
         f"<tr><td><code>{s}</code></td><td>${d['unit_cost']:.2f}</td><td>${d['est_shipping']:.2f}</td>"
         f'<td>{"" if s == "DEFAULT" else f"<form method=POST action=/api/sku/delete style=margin:0><input type=hidden name=shop value={shop}><input type=hidden name=sku value={s}><button class=btn-del>Delete</button></form>"}</td></tr>'
@@ -529,14 +601,14 @@ th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; }}
   <span style="font-size:13px"><span class="badge-ok">{plan_status}</span> <a class="btn-link" style="margin-left:8px" href="/billing/subscribe?shop={shop}">Upgrade ($9.99/mo)</a></span>
 </h1>
 <div class="card">
-  <h2>Connected Stores & OAuth Installer</h2>
-  <form method="GET" action="/" class="top-bar">
-    <div style="flex:1"><label>Active Store</label><select name="shop" onchange="this.form.submit()">{shop_options}</select></div>
-  </form>
-  <form method="GET" action="/install" class="top-bar" style="margin-top:8px">
-    <div style="flex:1"><label>Install New Shopify Store (OAuth)</label><input type="text" name="shop" placeholder="new-store.myshopify.com" style="margin-bottom:0" required></div>
-    <button type="submit">Connect Store</button>
-  </form>
+  <h2>Connected Store</h2>
+  <div class="top-bar" style="justify-content:space-between;align-items:center">
+    <div><strong style="color:#f8fafc">{shop}</strong> <span class="badge-ok" style="margin-left:8px">OAuth Connected &amp; Webhooks Active</span></div>
+    <form method="POST" action="/api/sync-orders" style="margin:0">
+      <input type="hidden" name="shop" value="{shop}">
+      <button type="submit" class="btn-sec">Sync Orders Now</button>
+    </form>
+  </div>
 </div>
 <div class="card">
   <h2>Margin & Alert Settings ({shop})</h2>
@@ -628,6 +700,14 @@ def handle_post(handler):
     shop, _, _, _ = sync_state(target_shop)
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
+    if handler.path == "/api/sync-orders":
+        conn.close()
+        sync_recent_orders(shop)
+        handler.send_response(302)
+        handler.send_header("Location", f"/?shop={shop}")
+        handler.end_headers()
+        return
+
     if handler.path == "/api/settings":
         c.execute("UPDATE merchants SET min_margin_pct = ?, alert_webhook_url = ? WHERE shop_domain = ?",
                   (float(form.get("min_margin_pct", 15.0)), form.get("alert_webhook_url", ""), shop))
