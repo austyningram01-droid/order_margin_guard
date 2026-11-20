@@ -50,16 +50,8 @@ def init_db():
         created_at TEXT
     )""")
 
-    settings = load_base_settings()
-    shop = settings.get("shopify_domain") or settings.get("shopify_store_url") or "default_store"
-    min_m = float(settings.get("min_margin_pct", 15.0))
-    webhook = settings.get("alert_webhook_url") or settings.get("discord_webhook_url") or ""
-    token = settings.get("shopify_access_token", "")
-
-    c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, ?, ?, ?, 'FREE_TRIAL')",
-              (shop, min_m, webhook, token))
-    if token:
-        c.execute("UPDATE merchants SET access_token = ? WHERE shop_domain = ? AND (access_token IS NULL OR access_token = '')", (token, shop))
+    # Strictly isolate per-shop OAuth credentials; never seed single-store Custom App tokens
+    c.execute("DELETE FROM merchants WHERE shop_domain = 'default_store'")
 
     cogs = {"DEFAULT": {"unit_cost": 10.0, "est_shipping": 5.0}}
     if os.path.exists("sku_cogs.json"):
@@ -135,11 +127,9 @@ def get_shop_token_and_plan(shop):
     c.execute("SELECT access_token, plan_status FROM merchants WHERE shop_domain = ?", (shop,))
     row = c.fetchone()
     conn.close()
-    settings = load_base_settings()
-    fallback_token = settings.get("shopify_access_token", "")
     if row:
-        return (row[0] or fallback_token), (row[1] or "FREE_TRIAL")
-    return fallback_token, "FREE_TRIAL"
+        return (row[0] or ""), (row[1] or "FREE_TRIAL")
+    return "", "FREE_TRIAL"
 
 def import_store_skus(shop):
     token, _ = get_shop_token_and_plan(shop)
@@ -250,7 +240,7 @@ def register_order_webhook(shop, access_token):
     if not shop or not access_token:
         return
     url = f"https://{shop}/admin/api/2024-10/webhooks.json"
-    for topic in ("orders/create", "orders/paid"):
+    for topic in ("orders/create", "orders/paid", "app/uninstalled"):
         payload = json.dumps({
             "webhook": {
                 "topic": topic,
@@ -373,8 +363,24 @@ document.addEventListener('DOMContentLoaded', () => {
         return
 
     if parsed.path == "/billing/subscribe":
-        shop, _, _, _ = sync_state(qs.get("shop"))
+        shop = normalize_shop(qs.get("shop"))
+        if not shop:
+            handler.send_response(400)
+            handler.end_headers()
+            handler.wfile.write(b"Missing shop parameter")
+            return
+        sync_state(shop)
         token, current_plan = get_shop_token_and_plan(shop)
+        if not token:
+            install_url = f"{APP_URL}/install?shop={shop}"
+            reauth_html = f'<!DOCTYPE html><html><head><meta name="shopify-api-key" content="{client_id}" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><script>window.top.location.href = {json.dumps(install_url)};</script></head><body>Redirecting to Shopify authorization...</body></html>'
+            handler.send_response(200)
+            handler.send_header("Content-Type", "text/html; charset=utf-8")
+            handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
+            handler.end_headers()
+            handler.wfile.write(reauth_html.encode("utf-8"))
+            return
+
         url = f"https://{shop}/admin/api/2024-10/recurring_application_charges.json"
         payload = json.dumps({
             "recurring_application_charge": {
@@ -393,77 +399,96 @@ document.addEventListener('DOMContentLoaded', () => {
                 data = json.loads(resp.read().decode("utf-8"))
                 confirm_url = data.get("recurring_application_charge", {}).get("confirmation_url")
                 if confirm_url:
-                    handler.send_response(302)
-                    handler.send_header("Location", confirm_url)
+                    breakout_html = f"""<!DOCTYPE html><html><head>
+<meta name="shopify-api-key" content="{client_id}" />
+<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
+<script>window.top.location.href = {json.dumps(confirm_url)};</script>
+</head><body style="font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;padding:40px;text-align:center">
+<p>Redirecting to Shopify Billing approval...</p>
+<p><a href="{confirm_url}" target="_top" style="color:#38bdf8">Click here if not redirected automatically</a></p>
+</body></html>"""
+                    handler.send_response(200)
+                    handler.send_header("Content-Type", "text/html; charset=utf-8")
+                    handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
                     handler.end_headers()
+                    handler.wfile.write(breakout_html.encode("utf-8"))
                     return
+        except urllib.error.HTTPError as he:
+            if he.code in (401, 403):
+                install_url = f"{APP_URL}/install?shop={shop}"
+                reauth_html = f'<!DOCTYPE html><html><head><script>window.top.location.href = {json.dumps(install_url)};</script></head><body>Re-authorizing store...</body></html>'
+                handler.send_response(200)
+                handler.send_header("Content-Type", "text/html; charset=utf-8")
+                handler.end_headers()
+                handler.wfile.write(reauth_html.encode("utf-8"))
+                return
+            err_msg = f"HTTP {he.code}: {he.read().decode('utf-8', errors='ignore')}"
         except Exception as e:
             err_msg = str(e)
-            billing_html = f"""<!DOCTYPE html><html><head><meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><meta charset="utf-8"><title>Upgrade Margin Guard</title>
-            <style>body{{font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;max-width:600px;margin:60px auto;padding:20px}}
-            .card{{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:24px}}
-            .btn{{background:#0284c7;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:600;margin-right:10px}}</style></head>
-            <body><div class="card"><h2 style="margin-top:0;color:#38bdf8">🛡️ Margin Guard Pro ($9.99/mo)</h2>
-            <p><strong>Store:</strong> {shop} &nbsp;|&nbsp; <strong>Current Plan:</strong> {current_plan}</p>
-            <p style="color:#cbd5e1;font-size:14px;line-height:1.5">Note: Your store is currently connected using a single-store Custom App token (<code>shpat_...</code>). Shopify's hosted Billing Checkout screen only opens for apps created in the <strong>Shopify Partner Dashboard</strong>.</p>
-            <p style="color:#94a3b8;font-size:13px">You can activate Pro Test Mode directly below, or switch to Partner App credentials in <code>settings.json</code> to test Shopify's hosted billing screen.</p>
-            <div style="margin-top:20px">
-              <a class="btn" href="/billing/confirm?shop={shop}">✅ Activate Pro Plan (Test Mode)</a>
-              <a style="color:#94a3b8;text-decoration:none" href="/?shop={shop}">Cancel</a>
-            </div></div><script>
-async function sendShopifySessionToken(actionName) {{
-  try {{
-    // 1. Native App Bridge fetch (App Bridge CDN automatically injects Authorization: Bearer token)
-    await fetch('/api/session-auth?source=app_bridge&action=' + encodeURIComponent(actionName), {{
-      method: 'POST',
-      headers: {{ 'Content-Type': 'application/json' }},
-      body: JSON.stringify({{ action: actionName, ts: Date.now() }})
-    }});
-    // 2. Explicit idToken() call to ensure App Bridge idToken telemetry fires
-    if (window.shopify && typeof window.shopify.idToken === 'function') {{
-      const token = await window.shopify.idToken();
-      if (token) {{
-        await fetch('/api/session-auth?source=explicit&action=' + encodeURIComponent(actionName), {{
-          method: 'POST',
-          headers: {{
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token
-          }},
-          body: JSON.stringify({{ action: actionName, ts: Date.now() }})
-        }});
-      }}
-    }}
-  }} catch (err) {{
-    console.log('Session token ping:', err);
-  }}
-}}
-document.addEventListener('DOMContentLoaded', () => {{
-  sendShopifySessionToken('load');
-  setTimeout(() => sendShopifySessionToken('ready'), 1000);
-  setTimeout(() => sendShopifySessionToken('active'), 3500);
-  setInterval(() => sendShopifySessionToken('heartbeat'), 10000);
-  document.addEventListener('click', () => sendShopifySessionToken('click'));
-}});
-</script></body></html>"""
-            handler.send_response(200)
-            handler.send_header("Content-Type", "text/html; charset=utf-8")
-            handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
-            handler.end_headers()
-            handler.wfile.write(billing_html.encode("utf-8"))
-            return
+
+        embedded_app_url = f"https://{shop}/admin/apps/{client_id}" if client_id else f"{APP_URL}/?shop={shop}"
+        err_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Billing Error</title>
+<style>body{{font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;max-width:560px;margin:60px auto;padding:20px}}
+.card{{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:24px}}
+.btn{{background:#0284c7;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:600}}</style></head>
+<body><div class="card"><h2 style="margin-top:0;color:#f87171">Unable to Start Shopify Billing</h2>
+<p style="color:#cbd5e1;font-size:14px">Shopify returned an error while creating the recurring charge for <strong>{shop}</strong>:</p>
+<pre style="background:#0f172a;padding:12px;border-radius:6px;overflow-x:auto;font-size:12px;color:#94a3b8">{err_msg}</pre>
+<p style="margin-top:20px"><a class="btn" href="{embedded_app_url}" target="_top">Return to App</a></p>
+</div></body></html>"""
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.end_headers()
+        handler.wfile.write(err_html.encode("utf-8"))
+        return
 
     if parsed.path == "/billing/confirm":
-        shop = qs.get("shop", "")
-        if shop:
-            init_db()
-            conn = sqlite3.connect(DB_PATH)
-            c = conn.cursor()
-            c.execute("UPDATE merchants SET plan_status = 'PRO_ACTIVE ($9.99/mo)' WHERE shop_domain = ?", (shop,))
-            conn.commit()
-            conn.close()
-        handler.send_response(302)
-        handler.send_header("Location", f"/?shop={shop}")
+        shop = normalize_shop(qs.get("shop"))
+        charge_id = qs.get("charge_id", "").strip()
+        if shop and charge_id:
+            token, _ = get_shop_token_and_plan(shop)
+            if token:
+                check_url = f"https://{shop}/admin/api/2024-10/recurring_application_charges/{charge_id}.json"
+                check_req = urllib.request.Request(check_url, method="GET", headers={
+                    "X-Shopify-Access-Token": token,
+                    "Accept": "application/json"
+                })
+                try:
+                    with urllib.request.urlopen(check_req, timeout=10) as resp:
+                        charge_obj = json.loads(resp.read().decode("utf-8")).get("recurring_application_charge", {})
+                        status = charge_obj.get("status", "")
+                        if status == "accepted":
+                            act_url = f"https://{shop}/admin/api/2024-10/recurring_application_charges/{charge_id}/activate.json"
+                            act_req = urllib.request.Request(act_url, data=b"{}", method="POST", headers={
+                                "Content-Type": "application/json",
+                                "X-Shopify-Access-Token": token
+                            })
+                            with urllib.request.urlopen(act_req, timeout=10) as act_resp:
+                                act_data = json.loads(act_resp.read().decode("utf-8")).get("recurring_application_charge", {})
+                                status = act_data.get("status", status)
+                        init_db()
+                        conn = sqlite3.connect(DB_PATH)
+                        c = conn.cursor()
+                        if status == "active":
+                            c.execute("UPDATE merchants SET plan_status = 'PRO_ACTIVE ($9.99/mo)' WHERE shop_domain = ?", (shop,))
+                        else:
+                            c.execute("UPDATE merchants SET plan_status = 'FREE_TRIAL' WHERE shop_domain = ?", (shop,))
+                        conn.commit()
+                        conn.close()
+                except Exception as e:
+                    print(f"[!] Billing confirm verification error for {shop}: {e}")
+
+        dest_url = f"https://{shop}/admin/apps/{client_id}" if (shop and client_id) else f"{APP_URL}/?shop={shop}"
+        return_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Returning to Shopify...</title>
+<script>window.top.location.href = {json.dumps(dest_url)};</script>
+</head><body style="font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;padding:40px;text-align:center">
+<p>Returning to Margin Guard in Shopify Admin...</p>
+<p><a href="{dest_url}" target="_top" style="color:#38bdf8">Continue to App</a></p>
+</body></html>"""
+        handler.send_response(200)
+        handler.send_header("Content-Type", "text/html; charset=utf-8")
         handler.end_headers()
+        handler.wfile.write(return_html.encode("utf-8"))
         return
 
     if parsed.path == "/install":

@@ -188,6 +188,27 @@ class WebhookHandler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/"):
             return dashboard.handle_post(self)
         topic = self.headers.get("X-Shopify-Topic", "")
+        if topic == "app/uninstalled":
+            length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(length)
+            hmac_header = self.headers.get("X-Shopify-Hmac-Sha256", "")
+            if not dashboard.verify_shopify_hmac(body, hmac_header):
+                self.send_response(401)
+                self.end_headers()
+                self.wfile.write(b"Unauthorized HMAC")
+                return
+            uninstalled_shop = dashboard.normalize_shop(self.headers.get("X-Shopify-Shop-Domain", ""))
+            if uninstalled_shop:
+                dashboard.init_db()
+                conn = dashboard.sqlite3.connect(dashboard.DB_PATH)
+                c = conn.cursor()
+                c.execute("UPDATE merchants SET access_token = '', plan_status = 'FREE_TRIAL' WHERE shop_domain = ?", (uninstalled_shop,))
+                conn.commit()
+                conn.close()
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"OK")
+            return
         if self.path.startswith("/webhooks/compliance") or topic in ("customers/data_request", "customers/redact", "shop/redact"):
             return dashboard.handle_compliance_webhook(self)
         dashboard.sync_state(self.headers.get("X-Shopify-Shop-Domain"))
