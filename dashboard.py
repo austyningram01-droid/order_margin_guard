@@ -63,6 +63,13 @@ def normalize_shop(raw_shop):
         s = f"{s}.myshopify.com"
     return s
 
+def get_shopify_admin_app_url(shop, client_id):
+    clean = normalize_shop(shop)
+    handle = clean.replace(".myshopify.com", "")
+    if handle and client_id:
+        return f"https://admin.shopify.com/store/{handle}/apps/{client_id}"
+    return f"{APP_URL}/?shop={clean}"
+
 def sync_state(target_shop=None):
     init_db()
     shop = normalize_shop(target_shop) or "default_store"
@@ -384,19 +391,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 data = json.loads(resp.read().decode("utf-8"))
                 confirm_url = data.get("recurring_application_charge", {}).get("confirmation_url")
                 if confirm_url:
-                    breakout_html = f"""<!DOCTYPE html><html><head>
-<meta name="shopify-api-key" content="{client_id}" />
-<script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
-<script>window.open({json.dumps(confirm_url)}, "_top");</script>
-</head><body style="font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;padding:40px;text-align:center">
-<p>Redirecting to Shopify Billing approval...</p>
-<p><a href="{confirm_url}" target="_top" style="color:#38bdf8">Click here if not redirected automatically</a></p>
-</body></html>"""
-                    handler.send_response(200)
-                    handler.send_header("Content-Type", "text/html; charset=utf-8")
-                    handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
+                    handler.send_response(302)
+                    handler.send_header("Location", confirm_url)
                     handler.end_headers()
-                    handler.wfile.write(breakout_html.encode("utf-8"))
                     return
         except urllib.error.HTTPError as he:
             if he.code in (401, 403):
@@ -411,7 +408,7 @@ document.addEventListener('DOMContentLoaded', () => {
         except Exception as e:
             err_msg = str(e)
 
-        embedded_app_url = f"https://{shop}/admin/apps/{client_id}" if client_id else f"{APP_URL}/?shop={shop}"
+        embedded_app_url = get_shopify_admin_app_url(shop, client_id)
         err_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Billing Error</title>
 <style>body{{font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;max-width:560px;margin:60px auto;padding:20px}}
 .card{{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:24px}}
@@ -463,17 +460,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 except Exception as e:
                     print(f"[!] Billing confirm verification error for {shop}: {e}")
 
-        dest_url = f"https://{shop}/admin/apps/{client_id}" if (shop and client_id) else f"{APP_URL}/?shop={shop}"
-        return_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Returning to Shopify...</title>
-<script>window.open({json.dumps(dest_url)}, "_top");</script>
-</head><body style="font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;padding:40px;text-align:center">
-<p>Returning to Margin Guard in Shopify Admin...</p>
-<p><a href="{dest_url}" target="_top" style="color:#38bdf8">Continue to App</a></p>
-</body></html>"""
-        handler.send_response(200)
-        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        dest_url = get_shopify_admin_app_url(shop, client_id)
+        handler.send_response(302)
+        handler.send_header("Location", dest_url)
         handler.end_headers()
-        handler.wfile.write(return_html.encode("utf-8"))
         return
 
     if parsed.path == "/install":
@@ -531,7 +521,7 @@ document.addEventListener('DOMContentLoaded', () => {
         conn.close()
 
         register_order_webhook(shop, access_token)
-        embedded_url = f"https://{shop}/admin/apps/{client_id}" if client_id else f"/?shop={shop}"
+        embedded_url = get_shopify_admin_app_url(shop, client_id)
         handler.send_response(302)
         handler.send_header("Location", embedded_url)
         handler.end_headers()
@@ -609,7 +599,7 @@ th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; }}
 </head><body>
 <h1>
   <span>🛡️ Margin Guard App Dashboard</span>
-  <span style="font-size:13px"><span class="badge-ok">{plan_status}</span> <a class="btn-link" style="margin-left:8px" href="/billing/subscribe?shop={shop}">Upgrade ($9.99/mo)</a></span>
+  <span style="font-size:13px"><span class="badge-ok">{plan_status}</span> <a class="btn-link" style="margin-left:8px" href="/billing/subscribe?shop={shop}" target="_top">Upgrade ($9.99/mo)</a></span>
 </h1>
 <div class="card">
   <h2>Connected Store</h2>
