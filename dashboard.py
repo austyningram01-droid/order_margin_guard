@@ -470,6 +470,9 @@ document.addEventListener('DOMContentLoaded', () => {
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 confirm_url = data.get("recurring_application_charge", {}).get("confirmation_url")
+                handle = shop.replace('.myshopify.com', '')
+                if confirm_url and f'https://{shop}/admin/' in confirm_url and handle:
+                    confirm_url = confirm_url.replace(f'https://{shop}/admin/', f'https://admin.shopify.com/store/{handle}/', 1)
                 if confirm_url:
                     if qs.get("mode") == "json":
                         handler.send_response(200)
