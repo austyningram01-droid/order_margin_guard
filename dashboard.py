@@ -31,6 +31,10 @@ def init_db():
         c.execute("ALTER TABLE merchants ADD COLUMN access_token TEXT DEFAULT ''")
     if "plan_status" not in cols:
         c.execute("ALTER TABLE merchants ADD COLUMN plan_status TEXT DEFAULT 'FREE_TRIAL'")
+    if "refresh_token" not in cols:
+        c.execute("ALTER TABLE merchants ADD COLUMN refresh_token TEXT DEFAULT ''")
+    if "expires_at" not in cols:
+        c.execute("ALTER TABLE merchants ADD COLUMN expires_at INTEGER DEFAULT 0")
 
     c.execute("""CREATE TABLE IF NOT EXISTS sku_costs (
         shop_domain TEXT,
@@ -114,14 +118,49 @@ def sync_state(target_shop=None):
     return shop, min_m, webhook, skus
 
 def get_shop_token_and_plan(shop):
+    init_db()
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute("SELECT access_token, plan_status FROM merchants WHERE shop_domain = ?", (shop,))
+    c.execute("SELECT access_token, plan_status, refresh_token, expires_at FROM merchants WHERE shop_domain = ?", (shop,))
     row = c.fetchone()
+    if not row:
+        conn.close()
+        return "", "FREE_TRIAL"
+    token, plan, refresh_tok, expires_at = row[0] or "", row[1] or "FREE_TRIAL", row[2] or "", int(row[3] or 0)
+    now_ts = int(time.time())
+    if token and refresh_tok and expires_at > 0 and now_ts >= (expires_at - 120):
+        settings = load_base_settings()
+        cid = settings.get("shopify_client_id", "")
+        csec = settings.get("shopify_client_secret", "")
+        if cid and csec:
+            try:
+                ref_req = urllib.request.Request(
+                    f"https://{shop}/admin/oauth/access_token",
+                    data=json.dumps({
+                        "client_id": cid,
+                        "client_secret": csec,
+                        "grant_type": "refresh_token",
+                        "refresh_token": refresh_tok
+                    }).encode("utf-8"),
+                    method="POST",
+                    headers={"Content-Type": "application/json"}
+                )
+                with urllib.request.urlopen(ref_req, timeout=10) as resp:
+                    rdata = json.loads(resp.read().decode("utf-8"))
+                    if rdata.get("access_token"):
+                        token = rdata["access_token"]
+                        refresh_tok = rdata.get("refresh_token", refresh_tok)
+                        expires_at = now_ts + int(rdata.get("expires_in", 3600))
+                        c.execute(
+                            "UPDATE merchants SET access_token = ?, refresh_token = ?, expires_at = ? WHERE shop_domain = ?",
+                            (token, refresh_tok, expires_at, shop)
+                        )
+                        conn.commit()
+            except Exception as e:
+                print(f"[!] Token refresh notice for {shop}: {e}")
     conn.close()
-    if row:
-        return (row[0] or ""), (row[1] or "FREE_TRIAL")
-    return "", "FREE_TRIAL"
+    return token, plan
+
 
 def import_store_skus(shop):
     token, _ = get_shop_token_and_plan(shop)
@@ -313,6 +352,21 @@ def handle_get(handler):
         <p>Margin Guard processes Shopify order totals, line-item SKUs, and fulfillment statuses solely to calculate order profit margins and place fulfillment holds when margins fall below merchant-configured thresholds.</p>
         <p><strong>Data Retention & GDPR Compliance:</strong> We do not sell or share merchant or customer data. When a store uninstalls Margin Guard or triggers a <code>shop/redact</code> or <code>customers/redact</code> webhook, all associated records are permanently removed.</p>
         <p><a href="/" style="color:#38bdf8">← Back to Dashboard</a></p><script>
+async function startShopifyBilling(shopDomain) {
+  const btn = document.getElementById('upgradeBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Opening Shopify Billing...'; }
+  try {
+    const resp = await fetch('/billing/subscribe?mode=json&shop=' + encodeURIComponent(shopDomain));
+    const data = await resp.json();
+    if (data && data.confirmation_url) {
+      window.open(data.confirmation_url, '_top');
+      return;
+    }
+  } catch (e) {
+    console.error('Billing start error:', e);
+  }
+  window.open('/billing/subscribe?shop=' + encodeURIComponent(shopDomain), '_top');
+}
 async function sendShopifySessionToken(actionName) {
   try {
     // 1. Native App Bridge fetch (App Bridge CDN automatically injects Authorization: Bearer token)
@@ -391,6 +445,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 data = json.loads(resp.read().decode("utf-8"))
                 confirm_url = data.get("recurring_application_charge", {}).get("confirmation_url")
                 if confirm_url:
+                    if qs.get("mode") == "json":
+                        handler.send_response(200)
+                        handler.send_header("Content-Type", "application/json")
+                        handler.end_headers()
+                        handler.wfile.write(json.dumps({"confirmation_url": confirm_url}).encode("utf-8"))
+                        return
                     handler.send_response(302)
                     handler.send_header("Location", confirm_url)
                     handler.end_headers()
@@ -479,7 +539,8 @@ document.addEventListener('DOMContentLoaded', () => {
         auth_url = f"https://{shop}/admin/oauth/authorize?" + urlencode({
             "client_id": client_id,
             "scope": SCOPES,
-            "redirect_uri": redirect_uri
+            "redirect_uri": redirect_uri,
+            "expiring": "1"
         })
         handler.send_response(302)
         handler.send_header("Location", auth_url)
@@ -505,6 +566,9 @@ document.addEventListener('DOMContentLoaded', () => {
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
                 access_token = data.get("access_token", "")
+                refresh_token = data.get("refresh_token", "")
+                expires_in = int(data.get("expires_in", 0) or 0)
+                expires_at = (int(time.time()) + expires_in) if expires_in > 0 else 0
         except Exception as e:
             handler.send_response(500)
             handler.end_headers()
@@ -515,7 +579,7 @@ document.addEventListener('DOMContentLoaded', () => {
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, 15.0, '', ?, 'FREE_TRIAL')", (shop, access_token))
-        c.execute("UPDATE merchants SET access_token = ? WHERE shop_domain = ?", (access_token, shop))
+        c.execute("UPDATE merchants SET access_token = ?, refresh_token = ?, expires_at = ? WHERE shop_domain = ?", (access_token, refresh_token, expires_at, shop))
         c.execute("INSERT OR IGNORE INTO sku_costs VALUES (?, 'DEFAULT', 10.0, 5.0)", (shop,))
         conn.commit()
         conn.close()
@@ -599,7 +663,7 @@ th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; }}
 </head><body>
 <h1>
   <span>🛡️ Margin Guard App Dashboard</span>
-  <span style="font-size:13px"><span class="badge-ok">{plan_status}</span> <a class="btn-link" style="margin-left:8px" href="/billing/subscribe?shop={shop}" target="_top">Upgrade ($9.99/mo)</a></span>
+  <span style="font-size:13px"><span class="badge-ok">{plan_status}</span> <button type="button" id="upgradeBtn" class="btn-link" style="margin-left:8px;border:none;cursor:pointer" onclick="startShopifyBilling('{shop}')">Upgrade ($9.99/mo)</button></span>
 </h1>
 <div class="card">
   <h2>Connected Store</h2>
