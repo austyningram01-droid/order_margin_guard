@@ -755,6 +755,46 @@ th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; }}
 </div>
 <p style="text-align:center;font-size:12px;color:#64748b"><a href="/privacy" style="color:#94a3b8">Privacy Policy & GDPR Compliance</a> • Compliance Webhook: <code>{APP_URL}/webhooks/compliance</code></p>
 <script>
+async function startShopifyBilling(shopDomain) {{
+  const btn = document.getElementById('upgradeBtn');
+  const params = new URLSearchParams(window.location.search);
+  const resolvedShop = (shopDomain && shopDomain !== 'default_store')
+    ? shopDomain
+    : ((window.shopify && window.shopify.config && window.shopify.config.shop) || params.get('shop') || '');
+  if (!resolvedShop) {{
+    alert('Store domain missing from session. Please reload the app from Shopify Admin.');
+    return;
+  }}
+  if (btn) {{ btn.disabled = true; btn.textContent = 'Preparing Checkout...'; }}
+  try {{
+    const resp = await fetch('/billing/subscribe?mode=json&shop=' + encodeURIComponent(resolvedShop));
+    const text = await resp.text();
+    let data = {{}};
+    try {{ data = JSON.parse(text); }} catch (_) {{}}
+    const targetUrl = data.confirmation_url || data.reauth_url;
+    if (targetUrl) {{
+      if (btn) {{
+        const link = document.createElement('a');
+        link.href = targetUrl;
+        link.target = '_top';
+        link.className = 'btn-link';
+        link.style.marginLeft = '8px';
+        link.textContent = data.confirmation_url ? 'Continue to Shopify Billing →' : 'Authorize Store →';
+        btn.replaceWith(link);
+      }}
+      try {{
+        open(targetUrl, '_top');
+      }} catch (_) {{
+        window.open(targetUrl, '_top');
+      }}
+      return;
+    }}
+    alert('Billing setup notice: ' + (data.error || text.slice(0, 200) || 'Unable to start billing.'));
+  }} catch (e) {{
+    alert('Network error starting Shopify Billing: ' + e);
+  }}
+  if (btn) {{ btn.disabled = false; btn.textContent = 'Upgrade ($9.99/mo)'; }}
+}}
 async function sendShopifySessionToken(actionName) {{
   try {{
     // 1. Native App Bridge fetch (App Bridge CDN automatically injects Authorization: Bearer token)
