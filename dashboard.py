@@ -358,7 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
         token, current_plan = get_shop_token_and_plan(shop)
         if not token:
             install_url = f"{APP_URL}/install?shop={shop}"
-            reauth_html = f'<!DOCTYPE html><html><head><meta name="shopify-api-key" content="{client_id}" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><script>window.top.location.href = {json.dumps(install_url)};</script></head><body>Redirecting to Shopify authorization...</body></html>'
+            reauth_html = f'<!DOCTYPE html><html><head><meta name="shopify-api-key" content="{client_id}" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><script>window.open({json.dumps(install_url)}, "_top");</script></head><body>Redirecting to Shopify authorization...</body></html>'
             handler.send_response(200)
             handler.send_header("Content-Type", "text/html; charset=utf-8")
             handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
@@ -387,7 +387,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     breakout_html = f"""<!DOCTYPE html><html><head>
 <meta name="shopify-api-key" content="{client_id}" />
 <script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script>
-<script>window.top.location.href = {json.dumps(confirm_url)};</script>
+<script>window.open({json.dumps(confirm_url)}, "_top");</script>
 </head><body style="font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;padding:40px;text-align:center">
 <p>Redirecting to Shopify Billing approval...</p>
 <p><a href="{confirm_url}" target="_top" style="color:#38bdf8">Click here if not redirected automatically</a></p>
@@ -401,7 +401,7 @@ document.addEventListener('DOMContentLoaded', () => {
         except urllib.error.HTTPError as he:
             if he.code in (401, 403):
                 install_url = f"{APP_URL}/install?shop={shop}"
-                reauth_html = f'<!DOCTYPE html><html><head><script>window.top.location.href = {json.dumps(install_url)};</script></head><body>Re-authorizing store...</body></html>'
+                reauth_html = f'<!DOCTYPE html><html><head><script>window.open({json.dumps(install_url)}, "_top");</script></head><body>Re-authorizing store...</body></html>'
                 handler.send_response(200)
                 handler.send_header("Content-Type", "text/html; charset=utf-8")
                 handler.end_headers()
@@ -465,7 +465,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         dest_url = f"https://{shop}/admin/apps/{client_id}" if (shop and client_id) else f"{APP_URL}/?shop={shop}"
         return_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Returning to Shopify...</title>
-<script>window.top.location.href = {json.dumps(dest_url)};</script>
+<script>window.open({json.dumps(dest_url)}, "_top");</script>
 </head><body style="font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;padding:40px;text-align:center">
 <p>Returning to Margin Guard in Shopify Admin...</p>
 <p><a href="{dest_url}" target="_top" style="color:#38bdf8">Continue to App</a></p>
@@ -531,8 +531,9 @@ document.addEventListener('DOMContentLoaded', () => {
         conn.close()
 
         register_order_webhook(shop, access_token)
+        embedded_url = f"https://{shop}/admin/apps/{client_id}" if client_id else f"/?shop={shop}"
         handler.send_response(302)
-        handler.send_header("Location", f"/?shop={shop}")
+        handler.send_header("Location", embedded_url)
         handler.end_headers()
         return
 
@@ -553,7 +554,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if clean_target and not token and client_id:
         install_redirect = f"{APP_URL}/install?shop={clean_target}"
-        auth_html = f'<!DOCTYPE html><html><head><meta name="shopify-api-key" content="7998051838e756e15758f12b29e9bcf2" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><script>window.top.location.href = {json.dumps(install_redirect)};</script></head><body>Redirecting to Shopify authorization for {clean_target}...</body></html>'
+        auth_html = f'<!DOCTYPE html><html><head><meta name="shopify-api-key" content="{client_id}" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><style>body{{font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;display:flex;align-items:center;justify-content:center;height:100vh;margin:0}}.box{{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:28px;text-align:center;max-width:440px}}.btn{{background:#0284c7;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:600;margin-top:12px}}</style><script>setTimeout(function(){{ window.open({json.dumps(install_redirect)}, "_top"); }}, 150);</script></head><body><div class="box"><h3 style="margin-top:0">Authorize Order Margin Guard</h3><p style="color:#cbd5e1;font-size:14px">Connecting <strong>{clean_target}</strong> via Shopify OAuth...</p><a class="btn" href="{install_redirect}" target="_top">Continue to Authorization</a></div></body></html>'
         handler.send_response(200)
         handler.send_header("Content-Type", "text/html; charset=utf-8")
         handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
