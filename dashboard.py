@@ -459,6 +459,12 @@ document.addEventListener('DOMContentLoaded', () => {
         except urllib.error.HTTPError as he:
             if he.code in (401, 403):
                 install_url = f"{APP_URL}/install?shop={shop}"
+                if qs.get("mode") == "json":
+                    handler.send_response(200)
+                    handler.send_header("Content-Type", "application/json")
+                    handler.end_headers()
+                    handler.wfile.write(json.dumps({"reauth_url": install_url}).encode("utf-8"))
+                    return
                 reauth_html = f'<!DOCTYPE html><html><head><script>window.open({json.dumps(install_url)}, "_top");</script></head><body>Re-authorizing store...</body></html>'
                 handler.send_response(200)
                 handler.send_header("Content-Type", "text/html; charset=utf-8")
@@ -469,6 +475,12 @@ document.addEventListener('DOMContentLoaded', () => {
         except Exception as e:
             err_msg = str(e)
 
+        if qs.get("mode") == "json":
+            handler.send_response(200)
+            handler.send_header("Content-Type", "application/json")
+            handler.end_headers()
+            handler.wfile.write(json.dumps({"error": err_msg}).encode("utf-8"))
+            return
         embedded_app_url = get_shopify_admin_app_url(shop, client_id)
         err_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Billing Error</title>
 <style>body{{font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;max-width:560px;margin:60px auto;padding:20px}}
