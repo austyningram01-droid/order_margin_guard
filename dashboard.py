@@ -52,21 +52,6 @@ def init_db():
 
     # Strictly isolate per-shop OAuth credentials; never seed single-store Custom App tokens
     c.execute("DELETE FROM merchants WHERE shop_domain = 'default_store'")
-
-    cogs = {"DEFAULT": {"unit_cost": 10.0, "est_shipping": 5.0}}
-    if os.path.exists("sku_cogs.json"):
-        try:
-            with open("sku_cogs.json", "r") as f:
-                loaded = json.load(f)
-                if isinstance(loaded, dict) and loaded:
-                    cogs.update(loaded)
-        except Exception:
-            pass
-    for sku, data in cogs.items():
-        if isinstance(data, dict):
-            uc = float(data.get("unit_cost", 10.0))
-            es = float(data.get("est_shipping", 5.0))
-            c.execute("INSERT OR IGNORE INTO sku_costs VALUES (?, ?, ?, ?)", (shop, sku, uc, es))
     conn.commit()
     conn.close()
 
