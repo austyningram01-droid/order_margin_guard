@@ -535,39 +535,46 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if parsed.path == "/billing/confirm":
         shop = normalize_shop(qs.get("shop"))
-        charge_id = qs.get("charge_id", "").strip()
-        if shop and charge_id:
+        if shop:
             token, _ = get_shop_token_and_plan(shop)
             if token:
-                check_url = f"https://{shop}/admin/api/2024-10/recurring_application_charges/{charge_id}.json"
-                check_req = urllib.request.Request(check_url, method="GET", headers={
-                    "X-Shopify-Access-Token": token,
-                    "Accept": "application/json"
-                })
+                gql_url = f"https://{shop}/admin/api/2025-01/graphql.json"
+                query = """
+                query {
+                  currentAppInstallation {
+                    activeSubscriptions {
+                      id
+                      name
+                      status
+                    }
+                  }
+                }
+                """
+                req = urllib.request.Request(
+                    gql_url,
+                    data=json.dumps({"query": query}).encode("utf-8"),
+                    method="POST",
+                    headers={
+                        "Content-Type": "application/json",
+                        "X-Shopify-Access-Token": token
+                    }
+                )
                 try:
-                    with urllib.request.urlopen(check_req, timeout=10) as resp:
-                        charge_obj = json.loads(resp.read().decode("utf-8")).get("recurring_application_charge", {})
-                        status = charge_obj.get("status", "")
-                        if status == "accepted":
-                            act_url = f"https://{shop}/admin/api/2024-10/recurring_application_charges/{charge_id}/activate.json"
-                            act_req = urllib.request.Request(act_url, data=b"{}", method="POST", headers={
-                                "Content-Type": "application/json",
-                                "X-Shopify-Access-Token": token
-                            })
-                            with urllib.request.urlopen(act_req, timeout=10) as act_resp:
-                                act_data = json.loads(act_resp.read().decode("utf-8")).get("recurring_application_charge", {})
-                                status = act_data.get("status", status)
+                    with urllib.request.urlopen(req, timeout=10) as resp:
+                        gdata = json.loads(resp.read().decode("utf-8"))
+                        subs = (((gdata.get("data") or {}).get("currentAppInstallation") or {}).get("activeSubscriptions")) or []
+                        is_active = any((s.get("status") or "").upper() == "ACTIVE" for s in subs)
                         init_db()
                         conn = sqlite3.connect(DB_PATH)
                         c = conn.cursor()
-                        if status == "active":
+                        if is_active:
                             c.execute("UPDATE merchants SET plan_status = 'PRO_ACTIVE ($9.99/mo)' WHERE shop_domain = ?", (shop,))
                         else:
                             c.execute("UPDATE merchants SET plan_status = 'FREE_TRIAL' WHERE shop_domain = ?", (shop,))
                         conn.commit()
                         conn.close()
                 except Exception as e:
-                    print(f"[!] Billing confirm verification error for {shop}: {e}")
+                    print(f"[!] GraphQL billing confirm verification error for {shop}: {e}")
 
         dest_url = get_shopify_admin_app_url(shop, client_id)
         handler.send_response(302)
