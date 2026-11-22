@@ -441,35 +441,58 @@ document.addEventListener('DOMContentLoaded', () => {
             handler.end_headers()
             handler.wfile.write(b"Missing shop parameter")
             return
-        sync_state(shop)
-        token, current_plan = get_shop_token_and_plan(shop)
+        token, _ = get_shop_token_and_plan(shop)
         if not token:
             install_url = f"{APP_URL}/install?shop={shop}"
-            reauth_html = f'<!DOCTYPE html><html><head><meta name="shopify-api-key" content="{client_id}" /><script src="https://cdn.shopify.com/shopifycloud/app-bridge.js"></script><script>window.open({json.dumps(install_url)}, "_top");</script></head><body>Redirecting to Shopify authorization...</body></html>'
-            handler.send_response(200)
-            handler.send_header("Content-Type", "text/html; charset=utf-8")
-            handler.send_header("Content-Security-Policy", "frame-ancestors https://*.myshopify.com https://admin.shopify.com;")
+            if qs.get("mode") == "json":
+                handler.send_response(200)
+                handler.send_header("Content-Type", "application/json")
+                handler.end_headers()
+                handler.wfile.write(json.dumps({"reauth_url": install_url}).encode("utf-8"))
+                return
+            handler.send_response(302)
+            handler.send_header("Location", install_url)
             handler.end_headers()
-            handler.wfile.write(reauth_html.encode("utf-8"))
             return
 
-        url = f"https://{shop}/admin/api/2024-10/recurring_application_charges.json"
-        payload = json.dumps({
-            "recurring_application_charge": {
-                "name": "Margin Guard Pro Plan",
-                "price": 9.99,
-                "return_url": f"{APP_URL}/billing/confirm?shop={shop}",
-                "test": True
+        gql_url = f"https://{shop}/admin/api/2025-01/graphql.json"
+        mutation = """
+        mutation AppSubscriptionCreate($name: String!, $lineItems: [AppSubscriptionLineItemInput!]!, $returnUrl: URL!, $test: Boolean) {
+          appSubscriptionCreate(name: $name, returnUrl: $returnUrl, lineItems: $lineItems, test: $test) {
+            userErrors { field message }
+            confirmationUrl
+            appSubscription { id status }
+          }
+        }
+        """
+        variables = {
+            "name": "Order Margin Guard Pro",
+            "returnUrl": f"{APP_URL}/billing/confirm?shop={shop}",
+            "test": True,
+            "lineItems": [{
+                "plan": {
+                    "appRecurringPricingDetails": {
+                        "price": {"amount": 9.99, "currencyCode": "USD"},
+                        "interval": "EVERY_30_DAYS"
+                    }
+                }
+            }]
+        }
+        req = urllib.request.Request(
+            gql_url,
+            data=json.dumps({"query": mutation, "variables": variables}).encode("utf-8"),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Shopify-Access-Token": token
             }
-        }).encode("utf-8")
-        req = urllib.request.Request(url, data=payload, method="POST", headers={
-            "Content-Type": "application/json",
-            "X-Shopify-Access-Token": token
-        })
+        )
         try:
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                confirm_url = data.get("recurring_application_charge", {}).get("confirmation_url")
+            with urllib.request.urlopen(req, timeout=12) as resp:
+                gdata = json.loads(resp.read().decode("utf-8"))
+                sub_res = (gdata.get("data") or {}).get("appSubscriptionCreate") or {}
+                user_errors = sub_res.get("userErrors") or []
+                confirm_url = sub_res.get("confirmationUrl") or ""
                 if confirm_url:
                     if qs.get("mode") == "json":
                         handler.send_response(200)
@@ -481,6 +504,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     handler.send_header("Location", confirm_url)
                     handler.end_headers()
                     return
+                err_msg = "; ".join(e.get("message", "") for e in user_errors) or json.dumps(gdata)[:240]
         except urllib.error.HTTPError as he:
             if he.code in (401, 403):
                 install_url = f"{APP_URL}/install?shop={shop}"
@@ -490,13 +514,11 @@ document.addEventListener('DOMContentLoaded', () => {
                     handler.end_headers()
                     handler.wfile.write(json.dumps({"reauth_url": install_url}).encode("utf-8"))
                     return
-                reauth_html = f'<!DOCTYPE html><html><head><script>window.open({json.dumps(install_url)}, "_top");</script></head><body>Re-authorizing store...</body></html>'
-                handler.send_response(200)
-                handler.send_header("Content-Type", "text/html; charset=utf-8")
+                handler.send_response(302)
+                handler.send_header("Location", install_url)
                 handler.end_headers()
-                handler.wfile.write(reauth_html.encode("utf-8"))
                 return
-            err_msg = f"HTTP {he.code}: {he.read().decode('utf-8', errors='ignore')}"
+            err_msg = f"HTTP {he.code}: {he.read().decode('utf-8', errors='ignore')[:200]}"
         except Exception as e:
             err_msg = str(e)
 
@@ -506,20 +528,9 @@ document.addEventListener('DOMContentLoaded', () => {
             handler.end_headers()
             handler.wfile.write(json.dumps({"error": err_msg}).encode("utf-8"))
             return
-        embedded_app_url = get_shopify_admin_app_url(shop, client_id)
-        err_html = f"""<!DOCTYPE html><html><head><meta charset="utf-8"><title>Billing Error</title>
-<style>body{{font-family:-apple-system,sans-serif;background:#0f172a;color:#f8fafc;max-width:560px;margin:60px auto;padding:20px}}
-.card{{background:#1e293b;border:1px solid #334155;border-radius:10px;padding:24px}}
-.btn{{background:#0284c7;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;font-weight:600}}</style></head>
-<body><div class="card"><h2 style="margin-top:0;color:#f87171">Unable to Start Shopify Billing</h2>
-<p style="color:#cbd5e1;font-size:14px">Shopify returned an error while creating the recurring charge for <strong>{shop}</strong>:</p>
-<pre style="background:#0f172a;padding:12px;border-radius:6px;overflow-x:auto;font-size:12px;color:#94a3b8">{err_msg}</pre>
-<p style="margin-top:20px"><a class="btn" href="{embedded_app_url}" target="_top">Return to App</a></p>
-</div></body></html>"""
-        handler.send_response(200)
-        handler.send_header("Content-Type", "text/html; charset=utf-8")
+        handler.send_response(500)
         handler.end_headers()
-        handler.wfile.write(err_html.encode("utf-8"))
+        handler.wfile.write(f"Billing error: {err_msg}".encode("utf-8"))
         return
 
     if parsed.path == "/billing/confirm":
