@@ -353,48 +353,68 @@ def handle_get(handler):
         <p>Margin Guard processes Shopify order totals, line-item SKUs, and fulfillment statuses solely to calculate order profit margins and place fulfillment holds when margins fall below merchant-configured thresholds.</p>
         <p><strong>Data Retention & GDPR Compliance:</strong> We do not sell or share merchant or customer data. When a store uninstalls Margin Guard or triggers a <code>shop/redact</code> or <code>customers/redact</code> webhook, all associated records are permanently removed.</p>
         <p><a href="/" style="color:#38bdf8">← Back to Dashboard</a></p><script>
-async function startShopifyBilling(shopDomain) {
+async function startShopifyBilling(shopDomain) {{
   const btn = document.getElementById('upgradeBtn');
   const params = new URLSearchParams(window.location.search);
   const resolvedShop = (shopDomain && shopDomain !== 'default_store')
     ? shopDomain
     : ((window.shopify && window.shopify.config && window.shopify.config.shop) || params.get('shop') || '');
-  if (!resolvedShop) {
+  if (!resolvedShop) {{
     alert('Store domain missing from session. Please reload the app from Shopify Admin.');
     return;
-  }
-  if (btn) { btn.disabled = true; btn.textContent = 'Preparing Checkout...'; }
-  try {
+  }}
+  if (btn) {{ btn.disabled = true; btn.textContent = 'Preparing Checkout...'; }}
+  try {{
     let idTok = '';
     try {{ if (window.shopify && typeof window.shopify.idToken === 'function') idTok = await window.shopify.idToken(); }} catch (_) {{}}
-    const resp = await fetch('/billing/subscribe?mode=json&shop=' + encodeURIComponent(resolvedShop) + (idTok ? '&id_token=' + encodeURIComponent(idTok) : ''));
+    const headers = idTok ? {{ 'Authorization': 'Bearer ' + idTok }} : {{}};
+    const resp = await fetch('/billing/subscribe?mode=json&shop=' + encodeURIComponent(resolvedShop), {{ headers }});
     const text = await resp.text();
-    let data = {};
-    try { data = JSON.parse(text); } catch (_) {}
-    const targetUrl = data.confirmation_url || data.reauth_url;
-    if (targetUrl) {
-      if (btn) {
+    let data = {{}};
+    try {{ data = JSON.parse(text); }} catch (_) {{}}
+    if (data.confirmation_url) {{
+      if (btn) {{
         const link = document.createElement('a');
-        link.href = targetUrl;
+        link.href = data.confirmation_url;
         link.target = '_top';
         link.className = 'btn-link';
         link.style.marginLeft = '8px';
-        link.textContent = data.confirmation_url ? 'Continue to Shopify Billing →' : 'Authorize Store →';
+        link.textContent = 'Continue to Shopify Billing →';
         btn.replaceWith(link);
-      }
-      try {
-        open(targetUrl, '_top');
-      } catch (_) {
-        window.open(targetUrl, '_top');
-      }
+      }}
+      try {{
+        open(data.confirmation_url, '_top');
+      }} catch (_) {{
+        window.open(data.confirmation_url, '_top');
+      }}
       return;
-    }
-    alert('Billing setup notice: ' + (data.error || text.slice(0, 200) || 'Unable to start billing.'));
-  } catch (e) {
+    }}
+    const errText = data.error || text.slice(0, 220) || 'Unable to start billing.';
+    let box = document.getElementById('billingErrorBox');
+    if (!box && btn && btn.parentElement) {{
+      box = document.createElement('div');
+      box.id = 'billingErrorBox';
+      box.style.cssText = 'margin-top:8px;padding:8px 12px;background:#7f1d1d;color:#fecaca;border-radius:6px;font-size:12px;';
+      btn.parentElement.appendChild(box);
+    }}
+    if (box) {{
+      box.textContent = 'Billing notice: ' + errText;
+      if (data.reauth_url) {{
+        const a = document.createElement('a');
+        a.href = data.reauth_url;
+        a.target = '_top';
+        a.style.cssText = 'color:#93c5fd;margin-left:8px;text-decoration:underline;';
+        a.textContent = 'Re-authorize store →';
+        box.appendChild(a);
+      }}
+    }} else {{
+      alert('Billing notice: ' + errText);
+    }}
+  }} catch (e) {{
     alert('Network error starting Shopify Billing: ' + e);
-  }
-  if (btn) { btn.disabled = false; btn.textContent = 'Upgrade ($9.99/mo)'; }
-}
+  }}
+  if (btn) {{ btn.disabled = false; btn.textContent = 'Upgrade ($9.99/mo)'; }}
+}}
 async function sendShopifySessionToken(actionName) {
   try {
     // 1. Native App Bridge fetch (App Bridge CDN automatically injects Authorization: Bearer token)
@@ -444,22 +464,28 @@ document.addEventListener('DOMContentLoaded', () => {
             handler.wfile.write(b"Missing shop parameter")
             return
         token, _ = get_shop_token_and_plan(shop)
-        id_token = (qs.get("id_token") or "").strip()
+        auth_hdr = (handler.headers.get("Authorization") or "").strip()
+        id_token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else (qs.get("id_token") or "").strip()
+        ex_err_msg = ""
         if not token and id_token and client_id and client_secret:
             try:
+                form_body = urlencode({
+                    "client_id": client_id,
+                    "client_secret": client_secret,
+                    "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                    "subject_token": id_token,
+                    "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
+                    "requested_token_type": "urn:shopify:params:oauth:token-type:offline-access-token",
+                    "expiring": "1",
+                }).encode("utf-8")
                 ex_req = urllib.request.Request(
                     f"https://{shop}/admin/oauth/access_token",
-                    data=json.dumps({
-                        "client_id": client_id,
-                        "client_secret": client_secret,
-                        "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-                        "subject_token": id_token,
-                        "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
-                        "requested_token_type": "urn:shopify:params:oauth:token-type:offline-access-token",
-                        "expiring": "1"
-                    }).encode("utf-8"),
+                    data=form_body,
                     method="POST",
-                    headers={"Content-Type": "application/json", "Accept": "application/json"}
+                    headers={
+                        "Content-Type": "application/x-www-form-urlencoded",
+                        "Accept": "application/json",
+                    },
                 )
                 with urllib.request.urlopen(ex_req, timeout=10) as ex_resp:
                     ex_data = json.loads(ex_resp.read().decode("utf-8"))
@@ -476,16 +502,21 @@ document.addEventListener('DOMContentLoaded', () => {
                         conn.commit()
                         conn.close()
                         token = ex_tok
+                    else:
+                        ex_err_msg = f"Empty token in exchange response: {json.dumps(ex_data)[:180]}"
+            except urllib.error.HTTPError as he:
+                ex_err_msg = f"Token exchange HTTP {he.code}: {he.read().decode('utf-8', errors='ignore')[:200]}"
             except Exception as ex_err:
-                print(f"[!] Token exchange fallback error for {shop}: {ex_err}")
+                ex_err_msg = f"Token exchange exception: {ex_err}"
 
         if not token:
             install_url = f"{APP_URL}/install?shop={shop}"
             if qs.get("mode") == "json":
+                reason = ex_err_msg or ("No App Bridge ID token sent" if not id_token else "Token missing")
                 handler.send_response(200)
                 handler.send_header("Content-Type", "application/json")
                 handler.end_headers()
-                handler.wfile.write(json.dumps({"reauth_url": install_url}).encode("utf-8"))
+                handler.wfile.write(json.dumps({"error": reason, "reauth_url": install_url}).encode("utf-8"))
                 return
             handler.send_response(302)
             handler.send_header("Location", install_url)
@@ -649,12 +680,13 @@ document.addEventListener('DOMContentLoaded', () => {
             handler.wfile.write(b"Invalid OAuth callback parameters")
             return
         token_url = f"https://{shop}/admin/oauth/access_token"
-        payload = json.dumps({
+        payload = urlencode({
             "client_id": client_id,
             "client_secret": client_secret,
-            "code": code
+            "code": code,
+            "expiring": "1"
         }).encode("utf-8")
-        req = urllib.request.Request(token_url, data=payload, method="POST", headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(token_url, data=payload, method="POST", headers={"Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json"})
         try:
             with urllib.request.urlopen(req, timeout=10) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
