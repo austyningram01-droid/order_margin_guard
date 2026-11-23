@@ -118,6 +118,49 @@ def sync_state(target_shop=None):
         pass
     return shop, min_m, webhook, skus
 
+def sync_live_subscription_status(shop, token, current_plan):
+    if not shop or not token:
+        return current_plan
+    try:
+        gql_url = f"https://{shop}/admin/api/2025-01/graphql.json"
+        query = """
+        query {
+          currentAppInstallation {
+            activeSubscriptions {
+              id
+              name
+              status
+              test
+            }
+          }
+        }
+        """
+        req = urllib.request.Request(
+            gql_url,
+            data=json.dumps({"query": query}).encode("utf-8"),
+            method="POST",
+            headers={
+                "Content-Type": "application/json",
+                "X-Shopify-Access-Token": token
+            }
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            gdata = json.loads(resp.read().decode("utf-8"))
+            subs = (((gdata.get("data") or {}).get("currentAppInstallation") or {}).get("activeSubscriptions")) or []
+            active_sub = next((s for s in subs if (s.get("status") or "").upper() == "ACTIVE"), None)
+            new_plan = f"PRO_ACTIVE ({active_sub.get('name') or '$9.99/mo'})" if active_sub else "FREE_TRIAL"
+            if new_plan != current_plan:
+                init_db()
+                conn = sqlite3.connect(DB_PATH)
+                c = conn.cursor()
+                c.execute("UPDATE merchants SET plan_status = ? WHERE shop_domain = ?", (new_plan, shop))
+                conn.commit()
+                conn.close()
+            return new_plan
+    except Exception as e:
+        print(f"[!] Live subscription sync note for {shop}: {e}")
+        return current_plan
+
 def get_shop_token_and_plan(shop):
     init_db()
     conn = sqlite3.connect(DB_PATH)
@@ -160,6 +203,8 @@ def get_shop_token_and_plan(shop):
             except Exception as e:
                 print(f"[!] Token refresh notice for {shop}: {e}")
     conn.close()
+    if token:
+        plan = sync_live_subscription_status(shop, token, plan)
     return token, plan
 
 
