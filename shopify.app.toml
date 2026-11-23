@@ -1,0 +1,25 @@
+name = "Order Margin Guard"
+client_id = "7998051838e756e15758f12b29e9bcf2"
+application_url = "https://order-margin-guard.onrender.com"
+embedded = true
+
+[access_scopes]
+scopes = "read_fulfillments,write_fulfillments,read_orders,write_orders,read_products"
+use_legacy_install_flow = false
+
+[auth]
+expiring_offline_access_tokens = true
+redirect_urls = [
+  "https://order-margin-guard.onrender.com/auth/callback"
+]
+
+[webhooks]
+api_version = "2026-10"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = [
+    "customers/data_request",
+    "customers/redact",
+    "shop/redact"
+  ]
+  uri = "/webhooks"
