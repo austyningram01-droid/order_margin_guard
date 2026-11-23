@@ -693,7 +693,7 @@ function startShopifyBilling(shopDomain) {{
     return;
   }}
   const storeHandle = resolvedShop.replace(/\.myshopify\.com$/i, '');
-  const pricingUrl = 'https://admin.shopify.com/store/' + encodeURIComponent(storeHandle) + '/charges/' + encodeURIComponent('order-margin-guard') + '/pricing_plans';
+  const pricingUrl = 'https://admin.shopify.com/store/' + encodeURIComponent(storeHandle) + '/charges/' + encodeURIComponent('Margin-guard-25') + '/pricing_plans';
   try {{
     open(pricingUrl, '_top');
   }} catch (_) {{

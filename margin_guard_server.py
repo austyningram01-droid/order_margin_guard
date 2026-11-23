@@ -180,6 +180,60 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(b'{"error":"Missing Bearer token"}')
                 return
+            bearer = auth_header[7:].strip()
+            try:
+                import base64, sqlite3, time, urllib.request
+                parts = bearer.split(".")
+                if len(parts) >= 2:
+                    pad = "=" * ((4 - len(parts[1]) % 4) % 4)
+                    claims = json.loads(base64.urlsafe_b64decode(parts[1] + pad).decode("utf-8"))
+                    tok_shop = claims.get("dest", "").replace("https://", "").strip("/").lower()
+                    if tok_shop and not tok_shop.endswith(".myshopify.com"):
+                        tok_shop = f"{tok_shop}.myshopify.com"
+                    cid = os.environ.get("SHOPIFY_CLIENT_ID", "").strip()
+                    csec = os.environ.get("SHOPIFY_CLIENT_SECRET", "").strip()
+                    if not cid or not csec:
+                        try:
+                            st = json.load(open("settings.json"))
+                            cid = cid or st.get("shopify_client_id", "").strip()
+                            csec = csec or st.get("shopify_client_secret", "").strip()
+                        except Exception:
+                            pass
+                    if tok_shop and cid and csec:
+                        conn = sqlite3.connect("margin_guard.db")
+                        c = conn.cursor()
+                        c.execute("CREATE TABLE IF NOT EXISTS merchants (shop_domain TEXT PRIMARY KEY, min_margin_pct REAL DEFAULT 15.0, alert_webhook_url TEXT DEFAULT '', access_token TEXT DEFAULT '', plan_status TEXT DEFAULT 'FREE_TRIAL', refresh_token TEXT DEFAULT '', expires_at INTEGER DEFAULT 0)")
+                        row = c.execute("SELECT access_token, expires_at FROM merchants WHERE shop_domain = ?", (tok_shop,)).fetchone()
+                        has_valid_expiring = bool(row and row[0] and row[1] and int(row[1]) > int(time.time()) + 60)
+                        if not has_valid_expiring:
+                            ex_req = urllib.request.Request(
+                                f"https://{tok_shop}/admin/oauth/access_token",
+                                data=json.dumps({
+                                    "client_id": client_id if "client_id" in locals() else cid,
+                                    "client_secret": csec,
+                                    "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                                    "subject_token": bearer,
+                                    "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
+                                    "requested_token_type": "urn:shopify:params:oauth:token-type:offline-access-token",
+                                    "expiring": "1"
+                                }).encode("utf-8"),
+                                method="POST",
+                                headers={"Content-Type": "application/json", "Accept": "application/json"}
+                            )
+                            with urllib.request.urlopen(ex_req, timeout=10) as ex_resp:
+                                ex_data = json.loads(ex_resp.read().decode("utf-8"))
+                                ex_tok = ex_data.get("access_token", "")
+                                ex_ref = ex_data.get("refresh_token", "")
+                                ex_exp_in = int(ex_data.get("expires_in", 0) or 0)
+                                ex_exp_at = (int(time.time()) + ex_exp_in) if ex_exp_in > 0 else 0
+                                if ex_tok:
+                                    c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, 15.0, '', ?, 'FREE_TRIAL')", (tok_shop, ex_tok))
+                                    c.execute("UPDATE merchants SET access_token = ?, refresh_token = ?, expires_at = ? WHERE shop_domain = ?", (ex_tok, ex_ref, ex_exp_at, tok_shop))
+                                    conn.commit()
+                                    print(f"[✓] Exchanged idToken for expiring=1 offline token for {tok_shop} (expires_in={ex_exp_in}s)")
+                        conn.close()
+            except Exception as ex_err:
+                print(f"[!] Session token exchange note: {ex_err}")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
