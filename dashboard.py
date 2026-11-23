@@ -365,7 +365,9 @@ async function startShopifyBilling(shopDomain) {
   }
   if (btn) { btn.disabled = true; btn.textContent = 'Preparing Checkout...'; }
   try {
-    const resp = await fetch('/billing/subscribe?mode=json&shop=' + encodeURIComponent(resolvedShop));
+    let idTok = '';
+    try {{ if (window.shopify && typeof window.shopify.idToken === 'function') idTok = await window.shopify.idToken(); }} catch (_) {{}}
+    const resp = await fetch('/billing/subscribe?mode=json&shop=' + encodeURIComponent(resolvedShop) + (idTok ? '&id_token=' + encodeURIComponent(idTok) : ''));
     const text = await resp.text();
     let data = {};
     try { data = JSON.parse(text); } catch (_) {}
@@ -442,6 +444,41 @@ document.addEventListener('DOMContentLoaded', () => {
             handler.wfile.write(b"Missing shop parameter")
             return
         token, _ = get_shop_token_and_plan(shop)
+        id_token = (qs.get("id_token") or "").strip()
+        if not token and id_token and client_id and client_secret:
+            try:
+                ex_req = urllib.request.Request(
+                    f"https://{shop}/admin/oauth/access_token",
+                    data=json.dumps({
+                        "client_id": client_id,
+                        "client_secret": client_secret,
+                        "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
+                        "subject_token": id_token,
+                        "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
+                        "requested_token_type": "urn:shopify:params:oauth:token-type:offline-access-token",
+                        "expiring": "1"
+                    }).encode("utf-8"),
+                    method="POST",
+                    headers={"Content-Type": "application/json", "Accept": "application/json"}
+                )
+                with urllib.request.urlopen(ex_req, timeout=10) as ex_resp:
+                    ex_data = json.loads(ex_resp.read().decode("utf-8"))
+                    ex_tok = ex_data.get("access_token", "")
+                    ex_ref = ex_data.get("refresh_token", "")
+                    ex_exp_in = int(ex_data.get("expires_in", 0) or 0)
+                    ex_exp_at = (int(time.time()) + ex_exp_in) if ex_exp_in > 0 else 0
+                    if ex_tok:
+                        init_db()
+                        conn = sqlite3.connect(DB_PATH)
+                        c = conn.cursor()
+                        c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, 15.0, '', ?, 'FREE_TRIAL')", (shop, ex_tok))
+                        c.execute("UPDATE merchants SET access_token = ?, refresh_token = ?, expires_at = ? WHERE shop_domain = ?", (ex_tok, ex_ref, ex_exp_at, shop))
+                        conn.commit()
+                        conn.close()
+                        token = ex_tok
+            except Exception as ex_err:
+                print(f"[!] Token exchange fallback error for {shop}: {ex_err}")
+
         if not token:
             install_url = f"{APP_URL}/install?shop={shop}"
             if qs.get("mode") == "json":
