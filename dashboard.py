@@ -24,14 +24,14 @@ def init_db():
         min_margin_pct REAL DEFAULT 15.0,
         alert_webhook_url TEXT DEFAULT '',
         access_token TEXT DEFAULT '',
-        plan_status TEXT DEFAULT 'FREE_TRIAL'
+        plan_status TEXT DEFAULT 'FREE_PLAN'
     )""")
     c.execute("PRAGMA table_info(merchants)")
     cols = [r[1] for r in c.fetchall()]
     if "access_token" not in cols:
         c.execute("ALTER TABLE merchants ADD COLUMN access_token TEXT DEFAULT ''")
     if "plan_status" not in cols:
-        c.execute("ALTER TABLE merchants ADD COLUMN plan_status TEXT DEFAULT 'FREE_TRIAL'")
+        c.execute("ALTER TABLE merchants ADD COLUMN plan_status TEXT DEFAULT 'FREE_PLAN'")
     if "refresh_token" not in cols:
         c.execute("ALTER TABLE merchants ADD COLUMN refresh_token TEXT DEFAULT ''")
     if "expires_at" not in cols:
@@ -83,10 +83,10 @@ def sync_state(target_shop=None):
     c.execute("SELECT shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status FROM merchants WHERE shop_domain = ?", (shop,))
     row = c.fetchone()
     if not row:
-        c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, 15.0, '', '', 'FREE_TRIAL')", (shop,))
+        c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, 15.0, '', '', 'FREE_PLAN')", (shop,))
         c.execute("INSERT OR IGNORE INTO sku_costs VALUES (?, 'DEFAULT', 10.0, 5.0)", (shop,))
         conn.commit()
-        row = (shop, 15.0, "", "", "FREE_TRIAL")
+        row = (shop, 15.0, "", "", "FREE_PLAN")
 
     shop, min_m, webhook, token, plan = row
 
@@ -148,7 +148,7 @@ def sync_live_subscription_status(shop, token, current_plan):
             gdata = json.loads(resp.read().decode("utf-8"))
             subs = (((gdata.get("data") or {}).get("currentAppInstallation") or {}).get("activeSubscriptions")) or []
             active_sub = next((s for s in subs if (s.get("status") or "").upper() == "ACTIVE"), None)
-            new_plan = f"PRO_ACTIVE ({active_sub.get('name') or '$9.99/mo'})" if active_sub else "FREE_TRIAL"
+            new_plan = f"PRO_ACTIVE ({active_sub.get('name') or '$9.99/mo'})" if active_sub else "FREE_PLAN"
             if new_plan != current_plan:
                 init_db()
                 conn = sqlite3.connect(DB_PATH)
@@ -169,8 +169,8 @@ def get_shop_token_and_plan(shop):
     row = c.fetchone()
     if not row:
         conn.close()
-        return "", "FREE_TRIAL"
-    token, plan, refresh_tok, expires_at = row[0] or "", row[1] or "FREE_TRIAL", row[2] or "", int(row[3] or 0)
+        return "", "FREE_PLAN"
+    token, plan, refresh_tok, expires_at = row[0] or "", row[1] or "FREE_PLAN", row[2] or "", int(row[3] or 0)
     now_ts = int(time.time())
     if token and refresh_tok and expires_at > 0 and now_ts >= (expires_at - 120):
         settings = load_base_settings()
@@ -484,7 +484,7 @@ document.addEventListener('DOMContentLoaded', () => {
             conn = sqlite3.connect(DB_PATH)
             c = conn.cursor()
             if plan_handle in ("free", "free-trial", "starter-free"):
-                c.execute("UPDATE merchants SET plan_status = 'FREE_TRIAL' WHERE shop_domain = ?", (shop,))
+                c.execute("UPDATE merchants SET plan_status = 'FREE_PLAN' WHERE shop_domain = ?", (shop,))
             else:
                 c.execute("UPDATE merchants SET plan_status = 'PRO_ACTIVE ($9.99/mo)' WHERE shop_domain = ?", (shop,))
             conn.commit()
@@ -524,7 +524,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         if is_active:
                             c.execute("UPDATE merchants SET plan_status = 'PRO_ACTIVE ($9.99/mo)' WHERE shop_domain = ?", (shop,))
                         else:
-                            c.execute("UPDATE merchants SET plan_status = 'FREE_TRIAL' WHERE shop_domain = ?", (shop,))
+                            c.execute("UPDATE merchants SET plan_status = 'FREE_PLAN' WHERE shop_domain = ?", (shop,))
                         conn.commit()
                         conn.close()
                 except Exception as e:
@@ -589,7 +589,7 @@ document.addEventListener('DOMContentLoaded', () => {
         init_db()
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, 15.0, '', ?, 'FREE_TRIAL')", (shop, access_token))
+        c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, 15.0, '', ?, 'FREE_PLAN')", (shop, access_token))
         c.execute("UPDATE merchants SET access_token = ?, refresh_token = ?, expires_at = ? WHERE shop_domain = ?", (access_token, refresh_token, expires_at, shop))
         c.execute("INSERT OR IGNORE INTO sku_costs VALUES (?, 'DEFAULT', 10.0, 5.0)", (shop,))
         conn.commit()
