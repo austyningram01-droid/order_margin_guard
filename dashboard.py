@@ -353,8 +353,7 @@ def handle_get(handler):
         <p>Margin Guard processes Shopify order totals, line-item SKUs, and fulfillment statuses solely to calculate order profit margins and place fulfillment holds when margins fall below merchant-configured thresholds.</p>
         <p><strong>Data Retention & GDPR Compliance:</strong> We do not sell or share merchant or customer data. When a store uninstalls Margin Guard or triggers a <code>shop/redact</code> or <code>customers/redact</code> webhook, all associated records are permanently removed.</p>
         <p><a href="/" style="color:#38bdf8">← Back to Dashboard</a></p><script>
-async function startShopifyBilling(shopDomain) {{
-  const btn = document.getElementById('upgradeBtn');
+function startShopifyBilling(shopDomain) {{
   const params = new URLSearchParams(window.location.search);
   const resolvedShop = (shopDomain && shopDomain !== 'default_store')
     ? shopDomain
@@ -363,57 +362,13 @@ async function startShopifyBilling(shopDomain) {{
     alert('Store domain missing from session. Please reload the app from Shopify Admin.');
     return;
   }}
-  if (btn) {{ btn.disabled = true; btn.textContent = 'Preparing Checkout...'; }}
+  const storeHandle = resolvedShop.replace(/\.myshopify\.com$/i, '');
+  const pricingUrl = 'https://admin.shopify.com/store/' + encodeURIComponent(storeHandle) + '/charges/order-margin-guard/pricing_plans';
   try {{
-    let idTok = '';
-    try {{ if (window.shopify && typeof window.shopify.idToken === 'function') idTok = await window.shopify.idToken(); }} catch (_) {{}}
-    const headers = idTok ? {{ 'Authorization': 'Bearer ' + idTok }} : {{}};
-    const resp = await fetch('/billing/subscribe?mode=json&shop=' + encodeURIComponent(resolvedShop), {{ headers }});
-    const text = await resp.text();
-    let data = {{}};
-    try {{ data = JSON.parse(text); }} catch (_) {{}}
-    if (data.confirmation_url) {{
-      if (btn) {{
-        const link = document.createElement('a');
-        link.href = data.confirmation_url;
-        link.target = '_top';
-        link.className = 'btn-link';
-        link.style.marginLeft = '8px';
-        link.textContent = 'Continue to Shopify Billing →';
-        btn.replaceWith(link);
-      }}
-      try {{
-        open(data.confirmation_url, '_top');
-      }} catch (_) {{
-        window.open(data.confirmation_url, '_top');
-      }}
-      return;
-    }}
-    const errText = data.error || text.slice(0, 220) || 'Unable to start billing.';
-    let box = document.getElementById('billingErrorBox');
-    if (!box && btn && btn.parentElement) {{
-      box = document.createElement('div');
-      box.id = 'billingErrorBox';
-      box.style.cssText = 'margin-top:8px;padding:8px 12px;background:#7f1d1d;color:#fecaca;border-radius:6px;font-size:12px;';
-      btn.parentElement.appendChild(box);
-    }}
-    if (box) {{
-      box.textContent = 'Billing notice: ' + errText;
-      if (data.reauth_url) {{
-        const a = document.createElement('a');
-        a.href = data.reauth_url;
-        a.target = '_top';
-        a.style.cssText = 'color:#93c5fd;margin-left:8px;text-decoration:underline;';
-        a.textContent = 'Re-authorize store →';
-        box.appendChild(a);
-      }}
-    }} else {{
-      alert('Billing notice: ' + errText);
-    }}
-  }} catch (e) {{
-    alert('Network error starting Shopify Billing: ' + e);
+    open(pricingUrl, '_top');
+  }} catch (_) {{
+    window.open(pricingUrl, '_top');
   }}
-  if (btn) {{ btn.disabled = false; btn.textContent = 'Upgrade ($9.99/mo)'; }}
 }}
 async function sendShopifySessionToken(actionName) {
   try {
@@ -603,7 +558,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if parsed.path == "/billing/confirm":
         shop = normalize_shop(qs.get("shop"))
-        if shop:
+        plan_handle = (qs.get("plan_handle") or "").strip().lower()
+        if shop and plan_handle:
+            init_db()
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            if plan_handle in ("free", "free-trial", "starter-free"):
+                c.execute("UPDATE merchants SET plan_status = 'FREE_TRIAL' WHERE shop_domain = ?", (shop,))
+            else:
+                c.execute("UPDATE merchants SET plan_status = 'PRO_ACTIVE ($9.99/mo)' WHERE shop_domain = ?", (shop,))
+            conn.commit()
+            conn.close()
+        elif shop:
             token, _ = get_shop_token_and_plan(shop)
             if token:
                 gql_url = f"https://{shop}/admin/api/2025-01/graphql.json"
