@@ -418,142 +418,17 @@ document.addEventListener('DOMContentLoaded', () => {
             handler.end_headers()
             handler.wfile.write(b"Missing shop parameter")
             return
-        token, _ = get_shop_token_and_plan(shop)
-        auth_hdr = (handler.headers.get("Authorization") or "").strip()
-        id_token = auth_hdr[7:].strip() if auth_hdr.lower().startswith("bearer ") else (qs.get("id_token") or "").strip()
-        ex_err_msg = ""
-        if not token and id_token and client_id and client_secret:
-            try:
-                form_body = urlencode({
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "grant_type": "urn:ietf:params:oauth:grant-type:token-exchange",
-                    "subject_token": id_token,
-                    "subject_token_type": "urn:ietf:params:oauth:token-type:id_token",
-                    "requested_token_type": "urn:shopify:params:oauth:token-type:offline-access-token",
-                    "expiring": "1",
-                }).encode("utf-8")
-                ex_req = urllib.request.Request(
-                    f"https://{shop}/admin/oauth/access_token",
-                    data=form_body,
-                    method="POST",
-                    headers={
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Accept": "application/json",
-                    },
-                )
-                with urllib.request.urlopen(ex_req, timeout=10) as ex_resp:
-                    ex_data = json.loads(ex_resp.read().decode("utf-8"))
-                    ex_tok = ex_data.get("access_token", "")
-                    ex_ref = ex_data.get("refresh_token", "")
-                    ex_exp_in = int(ex_data.get("expires_in", 0) or 0)
-                    ex_exp_at = (int(time.time()) + ex_exp_in) if ex_exp_in > 0 else 0
-                    if ex_tok:
-                        init_db()
-                        conn = sqlite3.connect(DB_PATH)
-                        c = conn.cursor()
-                        c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, 15.0, '', ?, 'FREE_TRIAL')", (shop, ex_tok))
-                        c.execute("UPDATE merchants SET access_token = ?, refresh_token = ?, expires_at = ? WHERE shop_domain = ?", (ex_tok, ex_ref, ex_exp_at, shop))
-                        conn.commit()
-                        conn.close()
-                        token = ex_tok
-                    else:
-                        ex_err_msg = f"Empty token in exchange response: {json.dumps(ex_data)[:180]}"
-            except urllib.error.HTTPError as he:
-                ex_err_msg = f"Token exchange HTTP {he.code}: {he.read().decode('utf-8', errors='ignore')[:200]}"
-            except Exception as ex_err:
-                ex_err_msg = f"Token exchange exception: {ex_err}"
-
-        if not token:
-            install_url = f"{APP_URL}/install?shop={shop}"
-            if qs.get("mode") == "json":
-                reason = ex_err_msg or ("No App Bridge ID token sent" if not id_token else "Token missing")
-                handler.send_response(200)
-                handler.send_header("Content-Type", "application/json")
-                handler.end_headers()
-                handler.wfile.write(json.dumps({"error": reason, "reauth_url": install_url}).encode("utf-8"))
-                return
-            handler.send_response(302)
-            handler.send_header("Location", install_url)
-            handler.end_headers()
-            return
-
-        gql_url = f"https://{shop}/admin/api/2025-01/graphql.json"
-        mutation = """
-        mutation AppSubscriptionCreate($name: String!, $lineItems: [AppSubscriptionLineItemInput!]!, $returnUrl: URL!, $test: Boolean) {
-          appSubscriptionCreate(name: $name, returnUrl: $returnUrl, lineItems: $lineItems, test: $test) {
-            userErrors { field message }
-            confirmationUrl
-            appSubscription { id status }
-          }
-        }
-        """
-        variables = {
-            "name": "Order Margin Guard Pro",
-            "returnUrl": f"{APP_URL}/billing/confirm?shop={shop}",
-            "test": True,
-            "lineItems": [{
-                "plan": {
-                    "appRecurringPricingDetails": {
-                        "price": {"amount": 9.99, "currencyCode": "USD"},
-                        "interval": "EVERY_30_DAYS"
-                    }
-                }
-            }]
-        }
-        req = urllib.request.Request(
-            gql_url,
-            data=json.dumps({"query": mutation, "variables": variables}).encode("utf-8"),
-            method="POST",
-            headers={
-                "Content-Type": "application/json",
-                "X-Shopify-Access-Token": token
-            }
-        )
-        try:
-            with urllib.request.urlopen(req, timeout=12) as resp:
-                gdata = json.loads(resp.read().decode("utf-8"))
-                sub_res = (gdata.get("data") or {}).get("appSubscriptionCreate") or {}
-                user_errors = sub_res.get("userErrors") or []
-                confirm_url = sub_res.get("confirmationUrl") or ""
-                if confirm_url:
-                    if qs.get("mode") == "json":
-                        handler.send_response(200)
-                        handler.send_header("Content-Type", "application/json")
-                        handler.end_headers()
-                        handler.wfile.write(json.dumps({"confirmation_url": confirm_url}).encode("utf-8"))
-                        return
-                    handler.send_response(302)
-                    handler.send_header("Location", confirm_url)
-                    handler.end_headers()
-                    return
-                err_msg = "; ".join(e.get("message", "") for e in user_errors) or json.dumps(gdata)[:240]
-        except urllib.error.HTTPError as he:
-            if he.code in (401, 403):
-                install_url = f"{APP_URL}/install?shop={shop}"
-                if qs.get("mode") == "json":
-                    handler.send_response(200)
-                    handler.send_header("Content-Type", "application/json")
-                    handler.end_headers()
-                    handler.wfile.write(json.dumps({"reauth_url": install_url}).encode("utf-8"))
-                    return
-                handler.send_response(302)
-                handler.send_header("Location", install_url)
-                handler.end_headers()
-                return
-            err_msg = f"HTTP {he.code}: {he.read().decode('utf-8', errors='ignore')[:200]}"
-        except Exception as e:
-            err_msg = str(e)
-
+        store_handle = shop.replace(".myshopify.com", "")
+        pricing_url = f"https://admin.shopify.com/store/{store_handle}/charges/order-margin-guard/pricing_plans"
         if qs.get("mode") == "json":
             handler.send_response(200)
             handler.send_header("Content-Type", "application/json")
             handler.end_headers()
-            handler.wfile.write(json.dumps({"error": err_msg}).encode("utf-8"))
+            handler.wfile.write(json.dumps({"confirmation_url": pricing_url}).encode("utf-8"))
             return
-        handler.send_response(500)
+        handler.send_response(302)
+        handler.send_header("Location", pricing_url)
         handler.end_headers()
-        handler.wfile.write(f"Billing error: {err_msg}".encode("utf-8"))
         return
 
     if parsed.path == "/billing/confirm":
@@ -754,7 +629,7 @@ th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; }}
 </head><body>
 <h1>
   <span>🛡️ Margin Guard App Dashboard</span>
-  <span style="font-size:13px"><span class="badge-ok">{plan_status}</span> <button type="button" id="upgradeBtn" class="btn-link" style="margin-left:8px;border:none;cursor:pointer" onclick="startShopifyBilling('{shop}')">Upgrade ($9.99/mo)</button></span>
+  <span style="font-size:13px"><span class="badge-ok">{plan_status}</span> <a id="upgradeBtn" class="btn-link" style="margin-left:8px" target="_top" href="https://admin.shopify.com/store/{(shop).replace('.myshopify.com', '')}/charges/order-margin-guard/pricing_plans">Upgrade ($9.99/mo)</a></span>
 </h1>
 <div class="card">
   <h2>Connected Store</h2>
