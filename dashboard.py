@@ -363,7 +363,7 @@ function startShopifyBilling(shopDomain) {{
     return;
   }}
   const storeHandle = resolvedShop.replace(/\.myshopify\.com$/i, '');
-  const pricingUrl = 'https://admin.shopify.com/store/' + encodeURIComponent(storeHandle) + '/charges/order-margin-guard/pricing_plans';
+  const pricingUrl = 'https://admin.shopify.com/store/' + encodeURIComponent(storeHandle) + '/charges/Margin-guard-25/pricing_plans';
   try {{
     open(pricingUrl, '_top');
   }} catch (_) {{
@@ -419,7 +419,7 @@ document.addEventListener('DOMContentLoaded', () => {
             handler.wfile.write(b"Missing shop parameter")
             return
         store_handle = shop.replace(".myshopify.com", "")
-        pricing_url = f"https://admin.shopify.com/store/{store_handle}/charges/order-margin-guard/pricing_plans"
+        pricing_url = f"https://admin.shopify.com/store/{store_handle}/charges/Margin-guard-25/pricing_plans"
         if qs.get("mode") == "json":
             handler.send_response(200)
             handler.send_header("Content-Type", "application/json")
@@ -629,7 +629,7 @@ th, td {{ text-align: left; padding: 10px; border-bottom: 1px solid #334155; }}
 </head><body>
 <h1>
   <span>🛡️ Margin Guard App Dashboard</span>
-  <span style="font-size:13px"><span class="badge-ok">{plan_status}</span> <a id="upgradeBtn" class="btn-link" style="margin-left:8px" target="_top" href="https://admin.shopify.com/store/{(shop).replace('.myshopify.com', '')}/charges/order-margin-guard/pricing_plans">Upgrade ($9.99/mo)</a></span>
+  <span style="font-size:13px"><span class="badge-ok">{plan_status}</span> <a id="upgradeBtn" class="btn-link" style="margin-left:8px" target="_top" href="https://admin.shopify.com/store/{(shop).replace('.myshopify.com', '')}/charges/Margin-guard-25/pricing_plans">Upgrade ($9.99/mo)</a></span>
 </h1>
 <div class="card">
   <h2>Connected Store</h2>
