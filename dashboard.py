@@ -559,7 +559,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     if parsed.path == "/auth/callback":
         shop = qs.get("shop", "").strip().lower()
+        if shop and not shop.endswith(".myshopify.com"):
+            shop = f"{shop}.myshopify.com"
         code = qs.get("code", "").strip()
+        if shop and not code:
+            embedded_url = get_shopify_admin_app_url(shop, client_id)
+            handler.send_response(302)
+            handler.send_header("Location", embedded_url)
+            handler.end_headers()
+            return
         if not shop or not code or not client_id or not client_secret:
             handler.send_response(400)
             handler.end_headers()
