@@ -1,5 +1,8 @@
 import dashboard
 import os, json
+DB_PATH = os.environ.get("DB_PATH", getattr(dashboard, "DB_PATH", "margin_guard.db")).strip() or "margin_guard.db"
+if os.path.dirname(DB_PATH):
+    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
 os.makedirs("config", exist_ok=True)
 os.makedirs("logs", exist_ok=True)
 if not os.path.exists("sku_cogs.json"):
@@ -79,9 +82,38 @@ def evaluate_order_margin(order: dict) -> dict:
     }
 
 
+def notify_admin_discord(title: str, shop_domain: str, details: str = ""):
+    admin_url = os.environ.get("ADMIN_DISCORD_WEBHOOK", "").strip()
+    if not admin_url:
+        return
+    payload = {
+        "username": "Order Margin Guard • Founder Telemetry",
+        "embeds": [{
+            "title": title,
+            "color": 1096065,
+            "fields": [
+                {"name": "Store", "value": shop_domain or "Unknown", "inline": True},
+                {"name": "Details", "value": details or "—", "inline": False}
+            ]
+        }]
+    }
+    try:
+        http.request("POST", admin_url, body=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+    except Exception as e:
+        print(f"[Admin Telemetry Warning] {e}")
+
+
 def hold_shopify_fulfillment(order_id: str, reason_notes: str) -> str:
     domain = SETTINGS.get("shopify_domain", "").replace("https://", "").strip("/")
     token = SETTINGS.get("shopify_access_token", "")
+    try:
+        fresh_tok, _ = dashboard.get_shop_token_and_plan(domain)
+        if fresh_tok:
+            token = fresh_tok
+    except Exception:
+        pass
+    if not domain or not token:
+        return "MISSING_SHOP_TOKEN"
     url = f"https://{domain}/admin/api/2026-01/graphql.json"
     headers = {
         "Content-Type": "application/json",
@@ -152,7 +184,7 @@ def send_instant_alert(res: dict, hold_status: str):
         f"**Gross Revenue:** ${res['gross_revenue']:.2f} | **Net Profit:** ${res['net_profit']:.2f} ({res['margin_pct']}%)\n"
         f"**Reasons:** `{res['hold_reasons']}`\n"
         f"**Shopify Status:** `{hold_status}`\n"
-        f"🔗 https://admin.shopify.com/store/ticktron/orders/{res['order_id']}"
+        f"🔗 https://admin.shopify.com/store/{SETTINGS.get('shopify_domain', 'ticktron').split('.')[0]}/orders/{res['order_id']}"
     )
     http.request("POST", webhook_url, body=json.dumps({"content": msg}).encode("utf-8"), headers={"Content-Type": "application/json"})
 
@@ -200,7 +232,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                         except Exception:
                             pass
                     if tok_shop and cid and csec:
-                        conn = sqlite3.connect("margin_guard.db")
+                        conn = sqlite3.connect(DB_PATH)
                         c = conn.cursor()
                         c.execute("CREATE TABLE IF NOT EXISTS merchants (shop_domain TEXT PRIMARY KEY, min_margin_pct REAL DEFAULT 15.0, alert_webhook_url TEXT DEFAULT '', access_token TEXT DEFAULT '', plan_status TEXT DEFAULT 'FREE_TRIAL', refresh_token TEXT DEFAULT '', expires_at INTEGER DEFAULT 0)")
                         row = c.execute("SELECT access_token, expires_at FROM merchants WHERE shop_domain = ?", (tok_shop,)).fetchone()
@@ -227,9 +259,12 @@ class WebhookHandler(BaseHTTPRequestHandler):
                                 ex_exp_in = int(ex_data.get("expires_in", 0) or 0)
                                 ex_exp_at = (int(time.time()) + ex_exp_in) if ex_exp_in > 0 else 0
                                 if ex_tok:
+                                    is_new_shop = not bool(row)
                                     c.execute("INSERT OR IGNORE INTO merchants (shop_domain, min_margin_pct, alert_webhook_url, access_token, plan_status) VALUES (?, 15.0, '', ?, 'FREE_TRIAL')", (tok_shop, ex_tok))
                                     c.execute("UPDATE merchants SET access_token = ?, refresh_token = ?, expires_at = ? WHERE shop_domain = ?", (ex_tok, ex_ref, ex_exp_at, tok_shop))
                                     conn.commit()
+                                    if is_new_shop:
+                                        notify_admin_discord("🚀 New App Install!", tok_shop, "Merchant completed OAuth token exchange.")
                                     print(f"[✓] Exchanged idToken for expiring=1 offline token for {tok_shop} (expires_in={ex_exp_in}s)")
                         conn.close()
             except Exception as ex_err:
@@ -258,6 +293,7 @@ class WebhookHandler(BaseHTTPRequestHandler):
                 c = conn.cursor()
                 c.execute("UPDATE merchants SET access_token = '', plan_status = 'FREE_TRIAL' WHERE shop_domain = ?", (uninstalled_shop,))
                 conn.commit()
+                notify_admin_discord("⚠️ App Uninstalled", uninstalled_shop, "Merchant uninstalled Order Margin Guard.")
                 conn.close()
             self.send_response(200)
             self.end_headers()
@@ -287,8 +323,10 @@ class WebhookHandler(BaseHTTPRequestHandler):
         
         if res["action"] == "HOLD_FULFILLMENT":
             print(f"    [!] Margin anomaly detected! Placing fulfillment hold...")
+            incoming_shop = self.headers.get("X-Shopify-Shop-Domain", "")
             res["shopify_hold_status"] = hold_shopify_fulfillment(res["order_id"], res["hold_reasons"])
             send_instant_alert(res, res["shopify_hold_status"])
+            notify_admin_discord("💰 Low-Margin Order Caught!", incoming_shop, f"Order {res['order_number']} | Net: ${res['net_profit']:.2f} ({res['margin_pct']}%) | Status: {res['shopify_hold_status']}")
         else:
             print(f"    [✓] Order profitable and clean. Approved.")
             res["shopify_hold_status"] = "NOT_REQUIRED"
@@ -316,26 +354,3 @@ if __name__ == "__main__":
         print("\n[!] Shutting down server...")
         server.server_close()
 
-
-def send_discord_alert(webhook_url, res, shop_domain):
-    if not webhook_url:
-        return
-    hold_status = res.get('hold_status', 'HOLD_FULFILLMENT')
-    msg = (
-        f"🚨 **MARGIN GUARD: Fulfillment Hold Placed**\n"
-        f"• **Store:** `{shop_domain}`\n"
-        f"• **Order:** `{res.get('order_name', '#Unknown')}` (Total: ${res.get('total_price', '0.00')} )\n"
-        f"• **Margin:** `{res.get('margin_pct', 0):.1f}%`\n"
-        f"• **Action:** `{hold_status}`\n"
-        f"🔗 https://admin.shopify.com/store/{shop_domain.split('.')[0]}/orders/{res.get('order_id','')}"
-    )
-    req = urllib.request.Request(
-        webhook_url,
-        data=json.dumps({"content": msg}).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
-        method="POST"
-    )
-    try:
-        urllib.request.urlopen(req, timeout=5)
-    except Exception as e:
-        print(f"Discord alert failed: {e}")
